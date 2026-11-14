@@ -56,10 +56,20 @@ class CounterStrikeUpdateChecker(commands.Cog):
                     return None
                 body = await response.json()
         for event in body.get("events", []):
-            if event.get("event_type") != 12:
+            if str(event.get("event_type")) != "12":
                 continue
             announcement = event.get("announcement_body") or {}
-            release = int(event.get("event_date") or event.get("posttime") or 0)
+            raw_release = (
+                event.get("event_date")
+                or event.get("posttime")
+                or announcement.get("posttime")
+                or announcement.get("release")
+                or 0
+            )
+            try:
+                release = int(raw_release)
+            except (TypeError, ValueError):
+                release = 0
             update_id = str(event.get("gid") or event.get("event_gid") or release)
             return {
                 "id": update_id,

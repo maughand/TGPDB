@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import logging
 import string
+import time
 
 import discord
 from discord.ext import commands
 
 import database
+import settings
 
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,7 @@ CHANNEL_FEATURES = {
 }
 MEMBER_COUNT_LABEL_SETTING = "member_count_label"
 DEFAULT_MEMBER_COUNT_LABEL = "Members"
+_member_count_updates: dict[int, float] = {}
 ALLOWED_TEMPLATE_FIELDS = {"user", "username", "server", "member_count"}
 SETTING_OPTIONS = {
     "welcome_message": "Welcome message",
@@ -49,8 +52,11 @@ def _validate_template(template: str) -> str | None:
     return None
 
 
-async def update_member_count_channel(guild: discord.Guild) -> None:
+async def update_member_count_channel(guild: discord.Guild, *, force: bool = True) -> None:
     """Keep the configured member-count channel name in sync with the guild."""
+    now = time.monotonic()
+    if not force and now - _member_count_updates.get(guild.id, 0.0) < 300:
+        return
     channel_id = await database.get_channel(guild.id, "member_count")
     channel = guild.get_channel(channel_id) if channel_id else None
     if not isinstance(channel, discord.TextChannel):
@@ -60,6 +66,7 @@ async def update_member_count_channel(guild: discord.Guild) -> None:
     count = guild.member_count or len(guild.members)
     try:
         await channel.edit(name=f"{label}: {count}"[:100], reason="Update configured member count")
+        _member_count_updates[guild.id] = now
     except discord.HTTPException:
         logger.exception("Could not update member count channel for guild %s", guild.id)
 
@@ -81,13 +88,15 @@ class MemberCountModal(discord.ui.Modal, title="Member count channel"):
         self.label.default = current_label
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        if not await self.panel.interaction_check(interaction):
+            return
         await interaction.response.defer()
         await database.set_setting(
             self.panel.guild.id,
             MEMBER_COUNT_LABEL_SETTING,
             str(self.label.value).strip() or DEFAULT_MEMBER_COUNT_LABEL,
         )
-        await update_member_count_channel(self.panel.guild)
+        await update_member_count_channel(self.panel.guild, force=True)
         self.panel.status = "Member count text saved and channel name updated."
         await self.panel.load()
         await interaction.edit_original_response(embed=self.panel._embed(), view=self.panel)
@@ -106,6 +115,8 @@ class FeatureSettingModal(discord.ui.Modal, title="Bot feature setting"):
         self.value.default = current
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        if not await self.panel.interaction_check(interaction):
+            return
         raw_value = str(self.value.value).strip()
         if self.setting == "starboard_threshold":
             if not raw_value.isdigit() or not 1 <= int(raw_value) <= 100:
@@ -224,6 +235,15 @@ class SetupPanel(discord.ui.View):
         }
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if settings.OWNER_USER_ID is None or interaction.user.id != settings.OWNER_USER_ID:
+            if getattr(self.guild, "owner_id", None) != interaction.user.id and not interaction.user.guild_permissions.manage_guild:
+                await interaction.response.send_message("You no longer have Manage Server permission to use this setup panel.", ephemeral=True)
+                return False
+        if getattr(interaction.client, "maintenance_mode", False):
+            owner_id = settings.OWNER_USER_ID
+            if owner_id is None or interaction.user.id != owner_id:
+                await interaction.response.send_message("The bot is currently in maintenance mode.", ephemeral=True)
+                return False
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("This setup panel belongs to the person who opened it.", ephemeral=True)
             return False
@@ -384,7 +404,7 @@ class SetupPanel(discord.ui.View):
         await database.set_channel(self.guild.id, self.selected_feature, self.selected_channel_id)
         await database.upsert_guild(self.guild)
         if self.selected_feature == "member_count":
-            await update_member_count_channel(self.guild)
+            await update_member_count_channel(self.guild, force=True)
         await self.load()
         self.page = 0
         self.status = f"Saved {CHANNEL_FEATURES[self.selected_feature].lower()}."
@@ -404,7 +424,7 @@ class SetupPanel(discord.ui.View):
     async def _sync(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         await database.sync_guild_members(self.guild)
-        await update_member_count_channel(self.guild)
+        await update_member_count_channel(self.guild, force=True)
         self.status = f"Saved {len(self.guild.members)} member(s)."
         await interaction.edit_original_response(embed=self._embed(), view=self)
 
@@ -439,10 +459,11 @@ class BotSetup(commands.Cog):
             choices = ", ".join(CHANNEL_FEATURES)
             await ctx.send(f"❌ Unknown feature. Choose one of: `{choices}`.", ephemeral=True)
             return
+        await ctx.defer()
         await database.set_channel(ctx.guild.id, feature, channel.id)
         await database.upsert_guild(ctx.guild)
         if feature == "member_count":
-            await update_member_count_channel(ctx.guild)
+            await update_member_count_channel(ctx.guild, force=True)
         await ctx.send(f"✅ {CHANNEL_FEATURES[feature]} will use {channel.mention}.", ephemeral=True)
 
     @botsetup.command(name="clear", description="Clear a configured bot feature channel.")
@@ -465,7 +486,7 @@ class BotSetup(commands.Cog):
             MEMBER_COUNT_LABEL_SETTING,
             custom_text.strip()[:80] or DEFAULT_MEMBER_COUNT_LABEL,
         )
-        await update_member_count_channel(ctx.guild)
+        await update_member_count_channel(ctx.guild, force=True)
         await ctx.send(
             f"✅ Member count channel configured in {channel.mention}.",
             ephemeral=True,
@@ -487,14 +508,15 @@ class BotSetup(commands.Cog):
     @botsetup.command(name="sync", description="Save the current guild and member information.")
     async def sync(self, ctx: commands.Context) -> None:
         """Refresh the persisted guild/member snapshot."""
+        await ctx.defer()
         await database.sync_guild_members(ctx.guild)
-        await update_member_count_channel(ctx.guild)
+        await update_member_count_channel(ctx.guild, force=True)
         await ctx.send(f"✅ Saved guild information and {len(ctx.guild.members)} member(s).", ephemeral=True)
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
         await database.upsert_member(member)
-        await update_member_count_channel(member.guild)
+        await update_member_count_channel(member.guild, force=False)
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
@@ -504,12 +526,12 @@ class BotSetup(commands.Cog):
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member) -> None:
         await database.remove_member(member.guild.id, member.id)
-        await update_member_count_channel(member.guild)
+        await update_member_count_channel(member.guild, force=False)
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild) -> None:
         await database.sync_guild_members(guild)
-        await update_member_count_channel(guild)
+        await update_member_count_channel(guild, force=True)
 
     @commands.Cog.listener()
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError) -> None:

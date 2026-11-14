@@ -115,6 +115,8 @@ async def setup_database() -> None:
                 mute_count INTEGER NOT NULL DEFAULT 0,
                 ban_count INTEGER NOT NULL DEFAULT 0,
                 softban_count INTEGER NOT NULL DEFAULT 0,
+                warn_count INTEGER NOT NULL DEFAULT 0,
+                kick_count INTEGER NOT NULL DEFAULT 0,
                 currently_muted INTEGER NOT NULL DEFAULT 0,
                 currently_banned INTEGER NOT NULL DEFAULT 0,
                 last_action TEXT,
@@ -253,6 +255,13 @@ async def setup_database() -> None:
         deletion_claim_columns = {row["name"] for row in _connection.execute("PRAGMA table_info(message_deletion_claims)").fetchall()}
         if "completed_at" not in deletion_claim_columns:
             _connection.execute("ALTER TABLE message_deletion_claims ADD COLUMN completed_at TEXT")
+        moderation_columns = {row["name"] for row in _connection.execute("PRAGMA table_info(member_moderation)").fetchall()}
+        if "warn_count" not in moderation_columns:
+            _connection.execute("ALTER TABLE member_moderation ADD COLUMN warn_count INTEGER NOT NULL DEFAULT 0")
+            if "warning_count" in moderation_columns:
+                _connection.execute("UPDATE member_moderation SET warn_count = warning_count WHERE warning_count > 0")
+        if "kick_count" not in moderation_columns:
+            _connection.execute("ALTER TABLE member_moderation ADD COLUMN kick_count INTEGER NOT NULL DEFAULT 0")
         stale_claim_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
         _connection.execute(
             "DELETE FROM starboard_messages WHERE starboard_message_id = 0 "
@@ -272,12 +281,36 @@ async def close_database() -> None:
             _connection = None
 
 
+async def backup_database(destination: Any) -> None:
+    """Create a consistent SQLite backup while serializing application writes."""
+    connection = await _ensure_database()
+    async with _lock:
+        backup = sqlite3.connect(destination)
+        try:
+            connection.backup(backup)
+        finally:
+            backup.close()
+
+
 async def _ensure_database() -> sqlite3.Connection:
     if _connection is None:
         await setup_database()
     if _connection is None:  # pragma: no cover - defensive guard
         raise RuntimeError("Database could not be initialized")
     return _connection
+
+
+def _ensure_guild_row(connection: sqlite3.Connection, guild_id: int) -> None:
+    """Guarantee a parent guild row before inserting guild-scoped child data."""
+    now = _now()
+    connection.execute(
+        """
+        INSERT INTO guilds (guild_id, name, owner_id, member_count, created_at, updated_at)
+        VALUES (?, 'Unknown Guild', NULL, 0, ?, ?)
+        ON CONFLICT(guild_id) DO NOTHING
+        """,
+        (guild_id, now, now),
+    )
 
 
 async def upsert_guild(guild: discord.Guild) -> None:
@@ -340,6 +373,7 @@ async def upsert_member(member: discord.Member) -> None:
     await upsert_guild(member.guild)
     now = _now()
     async with _lock:
+        _ensure_guild_row(connection, member.guild.id)
         connection.execute(
             """
             INSERT INTO guild_members
@@ -367,6 +401,7 @@ async def upsert_member(member: discord.Member) -> None:
 async def remove_member(guild_id: int, user_id: int) -> None:
     connection = await _ensure_database()
     async with _lock:
+        _ensure_guild_row(connection, guild_id)
         connection.execute("DELETE FROM guild_members WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
         connection.commit()
 
@@ -374,6 +409,7 @@ async def remove_member(guild_id: int, user_id: int) -> None:
 async def set_channel(guild_id: int, feature: str, channel_id: Optional[int]) -> None:
     connection = await _ensure_database()
     async with _lock:
+        _ensure_guild_row(connection, guild_id)
         connection.execute(
             """
             INSERT INTO guild_channels (guild_id, feature, channel_id, updated_at)
@@ -409,6 +445,7 @@ async def get_channels(guild_id: int) -> dict[str, Optional[int]]:
 async def set_setting(guild_id: int, setting: str, value: Any) -> None:
     connection = await _ensure_database()
     async with _lock:
+        _ensure_guild_row(connection, guild_id)
         connection.execute(
             """
             INSERT INTO guild_settings (guild_id, setting, value, updated_at)
@@ -448,6 +485,7 @@ async def add_notification_subscription(
     connection = await _ensure_database()
     now = _now()
     async with _lock:
+        _ensure_guild_row(connection, guild_id)
         connection.execute(
             """
             INSERT INTO notification_subscriptions
@@ -465,6 +503,7 @@ async def add_notification_subscription(
 async def remove_notification_subscription(guild_id: int, platform: str, identifier: str) -> bool:
     connection = await _ensure_database()
     async with _lock:
+        _ensure_guild_row(connection, guild_id)
         cursor = connection.execute(
             "DELETE FROM notification_subscriptions WHERE guild_id = ? AND platform = ? AND identifier = ?",
             (guild_id, platform, identifier),
@@ -530,10 +569,13 @@ async def record_moderation_action(
     is_ban = normalized == "ban"
     is_unban = normalized == "unban"
     is_softban = normalized == "softban"
+    is_warning = normalized == "warning"
+    is_kick = normalized == "kick"
     active = int(is_mute or is_ban)
     now = _now()
 
     async with _lock:
+        _ensure_guild_row(connection, guild_id)
         if is_mute:
             # A new timeout replaces any older active timeout for this member.
             connection.execute(
@@ -564,12 +606,14 @@ async def record_moderation_action(
         )
 
         summary = connection.execute(
-            "SELECT mute_count, ban_count, softban_count, currently_muted, currently_banned FROM member_moderation WHERE guild_id = ? AND user_id = ?",
+            "SELECT mute_count, ban_count, softban_count, warn_count, kick_count, currently_muted, currently_banned FROM member_moderation WHERE guild_id = ? AND user_id = ?",
             (guild_id, target_user_id),
         ).fetchone()
         mute_count = summary["mute_count"] if summary else 0
         ban_count = summary["ban_count"] if summary else 0
         softban_count = summary["softban_count"] if summary else 0
+        warning_count = summary["warn_count"] if summary else 0
+        kick_count = summary["kick_count"] if summary else 0
         currently_muted = summary["currently_muted"] if summary else 0
         currently_banned = summary["currently_banned"] if summary else 0
         if is_mute:
@@ -584,20 +628,25 @@ async def record_moderation_action(
             currently_banned = 0
         elif is_softban:
             softban_count += 1
+        elif is_warning:
+            warning_count += 1
+        elif is_kick:
+            kick_count += 1
 
         connection.execute(
             """
             INSERT INTO member_moderation
-                (guild_id, user_id, mute_count, ban_count, softban_count,
+                (guild_id, user_id, mute_count, ban_count, softban_count, warn_count, kick_count,
                  currently_muted, currently_banned, last_action, last_reason, last_action_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(guild_id, user_id) DO UPDATE SET
                 mute_count=excluded.mute_count, ban_count=excluded.ban_count,
                 softban_count=excluded.softban_count, currently_muted=excluded.currently_muted,
+                warn_count=excluded.warn_count, kick_count=excluded.kick_count,
                 currently_banned=excluded.currently_banned, last_action=excluded.last_action,
                 last_reason=excluded.last_reason, last_action_at=excluded.last_action_at
             """,
-            (guild_id, target_user_id, mute_count, ban_count, softban_count,
+            (guild_id, target_user_id, mute_count, ban_count, softban_count, warning_count, kick_count,
              currently_muted, currently_banned, action, reason, now),
         )
         connection.commit()
@@ -670,6 +719,7 @@ async def replace_reaction_roles(
     connection = await _ensure_database()
     now = _now()
     async with _lock:
+        _ensure_guild_row(connection, guild_id)
         connection.execute(
             "DELETE FROM reaction_roles WHERE guild_id = ? AND message_id = ?",
             (guild_id, message_id),
@@ -703,6 +753,7 @@ async def save_message_snapshot(message: discord.Message) -> None:
     connection = await _ensure_database()
     attachments = json.dumps([{"url": item.url, "filename": item.filename} for item in message.attachments])
     async with _lock:
+        _ensure_guild_row(connection, message.guild.id)
         connection.execute(
             """
             INSERT INTO message_snapshots
@@ -767,6 +818,7 @@ async def add_daily_stat(guild_id: int, day: str, field: str, amount: int = 1) -
         raise ValueError(f"Unsupported analytics field: {field}")
     connection = await _ensure_database()
     async with _lock:
+        _ensure_guild_row(connection, guild_id)
         connection.execute(
             "INSERT INTO daily_analytics (guild_id, day) VALUES (?, ?) ON CONFLICT(guild_id, day) DO NOTHING",
             (guild_id, day),
@@ -812,6 +864,7 @@ async def get_moderation_count(guild_id: int, since: str) -> int:
 async def add_scheduled_message(guild_id: int, channel_id: int, content: str, send_at: str, repeat_minutes: Optional[int], created_by: int) -> int:
     connection = await _ensure_database()
     async with _lock:
+        _ensure_guild_row(connection, guild_id)
         cursor = connection.execute(
             """
             INSERT INTO scheduled_messages (guild_id, channel_id, content, send_at, repeat_minutes, created_by)
@@ -866,6 +919,7 @@ async def remove_scheduled_message(guild_id: int, schedule_id: int) -> bool:
 async def award_xp(guild_id: int, user_id: int, amount: int, now: str) -> dict[str, int]:
     connection = await _ensure_database()
     async with _lock:
+        _ensure_guild_row(connection, guild_id)
         row = connection.execute("SELECT xp, level FROM member_xp WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)).fetchone()
         xp = (int(row["xp"]) if row else 0) + amount
         level = int(xp ** 0.5 // 5)
@@ -897,6 +951,7 @@ async def get_xp_leaderboard(guild_id: int, limit: int = 10) -> list[dict[str, A
 async def set_level_reward(guild_id: int, level: int, role_id: int) -> None:
     connection = await _ensure_database()
     async with _lock:
+        _ensure_guild_row(connection, guild_id)
         connection.execute(
             "INSERT INTO level_rewards (guild_id, level, role_id) VALUES (?, ?, ?) ON CONFLICT(guild_id, level) DO UPDATE SET role_id=excluded.role_id",
             (guild_id, level, role_id),
@@ -907,6 +962,7 @@ async def set_level_reward(guild_id: int, level: int, role_id: int) -> None:
 async def create_incident_case(guild_id: int, title: str, opened_by: int) -> int:
     connection = await _ensure_database()
     async with _lock:
+        _ensure_guild_row(connection, guild_id)
         cursor = connection.execute(
             "INSERT INTO incident_cases (guild_id, title, opened_by, created_at) VALUES (?, ?, ?, ?)",
             (guild_id, title[:200], opened_by, _now()),
@@ -946,6 +1002,7 @@ async def add_incident_evidence(
 ) -> Optional[int]:
     connection = await _ensure_database()
     async with _lock:
+        _ensure_guild_row(connection, guild_id)
         exists = connection.execute(
             "SELECT 1 FROM incident_cases WHERE guild_id = ? AND case_id = ?",
             (guild_id, case_id),
@@ -994,6 +1051,7 @@ async def get_starboard_message(guild_id: int, message_id: int) -> Optional[int]
 async def set_starboard_message(guild_id: int, message_id: int, starboard_message_id: int) -> None:
     connection = await _ensure_database()
     async with _lock:
+        _ensure_guild_row(connection, guild_id)
         connection.execute(
             """
             INSERT INTO starboard_messages (guild_id, message_id, starboard_message_id, claimed_at)
@@ -1009,6 +1067,7 @@ async def claim_starboard_message(guild_id: int, message_id: int) -> bool:
     """Atomically reserve a source message so concurrent reactions post once."""
     connection = await _ensure_database()
     async with _lock:
+        _ensure_guild_row(connection, guild_id)
         stale_claim_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
         connection.execute(
             "DELETE FROM starboard_messages WHERE guild_id = ? AND message_id = ? AND starboard_message_id = 0 "
@@ -1026,6 +1085,7 @@ async def claim_starboard_message(guild_id: int, message_id: int) -> bool:
 async def release_starboard_claim(guild_id: int, message_id: int) -> None:
     connection = await _ensure_database()
     async with _lock:
+        _ensure_guild_row(connection, guild_id)
         connection.execute(
             "DELETE FROM starboard_messages WHERE guild_id = ? AND message_id = ? AND starboard_message_id = 0",
             (guild_id, message_id),
@@ -1072,6 +1132,7 @@ async def is_cs2_update_delivered(guild_id: int, update_id: str) -> bool:
 async def mark_cs2_update_delivered(guild_id: int, update_id: str) -> None:
     connection = await _ensure_database()
     async with _lock:
+        _ensure_guild_row(connection, guild_id)
         connection.execute(
             "INSERT OR IGNORE INTO cs2_update_deliveries (guild_id, update_id, delivered_at) VALUES (?, ?, ?)",
             (guild_id, update_id, _now()),
@@ -1087,6 +1148,7 @@ async def claim_cs2_update_delivery(guild_id: int, update_id: str) -> bool:
     """Atomically reserve one guild's CS2 delivery for concurrent checkers."""
     connection = await _ensure_database()
     async with _lock:
+        _ensure_guild_row(connection, guild_id)
         stale = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
         connection.execute("DELETE FROM cs2_update_claims WHERE claimed_at < ?", (stale,))
         cursor = connection.execute(
@@ -1100,6 +1162,7 @@ async def claim_cs2_update_delivery(guild_id: int, update_id: str) -> bool:
 async def release_cs2_update_claim(guild_id: int, update_id: str) -> None:
     connection = await _ensure_database()
     async with _lock:
+        _ensure_guild_row(connection, guild_id)
         connection.execute(
             "DELETE FROM cs2_update_claims WHERE guild_id = ? AND update_id = ?",
             (guild_id, update_id),

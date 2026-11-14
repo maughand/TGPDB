@@ -60,6 +60,11 @@ class Community(commands.Cog):
     def cog_unload(self) -> None:
         self.worker.cancel()
 
+    def clear_cache(self) -> None:
+        self.xp_cooldowns.clear()
+        self.raid_joins.clear()
+        self.sent_analytics_days.clear()
+
     async def _channel(self, guild: discord.Guild, feature: str) -> Optional[discord.TextChannel]:
         channel_id = await database.get_channel(guild.id, feature)
         channel = guild.get_channel(channel_id) if channel_id else None
@@ -349,9 +354,9 @@ class Community(commands.Cog):
         summary = await database.get_member_moderation(ctx.guild.id, member.id)
         actions = await database.get_member_actions(ctx.guild.id, member.id)
         lines = [f"{row['action']} — {row['reason'] or 'No reason'}" for row in actions[-10:]]
-        embed = discord.Embed(title=f"Infractions · {member}", description="\n".join(lines) or "No recorded actions.", colour=discord.Colour.orange())
+        embed = discord.Embed(title=f"Infractions · {member}", description=("\n".join(lines) or "No recorded actions.")[:4096], colour=discord.Colour.orange())
         if summary:
-            embed.add_field(name="Warnings/actions", value=f"Mutes: {summary['mute_count']}\nBans: {summary['ban_count']}\nSoftbans: {summary['softban_count']}")
+            embed.add_field(name="Warnings/actions", value=f"Warnings: {summary['warn_count']}\nKicks: {summary['kick_count']}\nMutes: {summary['mute_count']}\nBans: {summary['ban_count']}\nSoftbans: {summary['softban_count']}")
         if ctx.interaction is not None:
             await ctx.send(embed=embed, ephemeral=True)
         else:
@@ -400,6 +405,7 @@ class Community(commands.Cog):
     async def on_message(self, message: discord.Message) -> None:
         if message.guild is None:
             return
+        await database.upsert_guild(message.guild)
         await database.save_message_snapshot(message)
         await database.add_daily_stat(message.guild.id, datetime.now(timezone.utc).date().isoformat(), "messages")
         if message.author.bot:
@@ -426,7 +432,7 @@ class Community(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message) -> None:
-        if message.guild is None:
+        if message.guild is None or message.author.bot:
             return
         await self._audit_deleted_message(message.guild, message.id, message)
 
@@ -440,6 +446,9 @@ class Community(commands.Cog):
             return
         snapshot = await database.get_message_snapshot(message_id)
         if message is not None:
+            if message.author.bot:
+                await database.release_message_deletion_claim(message_id)
+                return
             snapshot = {
                 "content": message.content,
                 "author_id": message.author.id,
@@ -478,19 +487,53 @@ class Community(commands.Cog):
     async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent) -> None:
         guild = self.bot.get_guild(payload.guild_id) if payload.guild_id else None
         if guild:
-            await self._audit_deleted_message(guild, payload.message_id, payload.cached_message)
+            if payload.cached_message is None or not payload.cached_message.author.bot:
+                await self._audit_deleted_message(guild, payload.message_id, payload.cached_message)
 
     @commands.Cog.listener()
     async def on_raw_bulk_message_delete(self, payload: discord.RawBulkMessageDeleteEvent) -> None:
         guild = self.bot.get_guild(payload.guild_id) if payload.guild_id else None
-        if guild:
-            cached_messages = {message.id: message for message in payload.cached_messages}
-            for message_id in payload.message_ids:
-                await self._audit_deleted_message(guild, message_id, cached_messages.get(message_id))
+        if not guild:
+            return
+        cached_messages = {message.id: message for message in payload.cached_messages}
+        entries: list[tuple[int, str, Optional[str]]] = []
+        for message_id in payload.message_ids:
+            message = cached_messages.get(message_id)
+            if message is not None and message.author.bot:
+                continue
+            if not await database.claim_message_deletion(message_id):
+                continue
+            snapshot = await database.get_message_snapshot(message_id)
+            if message is not None:
+                author_id = message.author.id
+                content = message.content
+                attachments = [{"url": item.url, "filename": item.filename} for item in message.attachments]
+            elif snapshot:
+                author_id = snapshot["author_id"]
+                content = snapshot["content"]
+                attachments = json.loads(snapshot["attachments"] or "[]")
+            else:
+                author_id, content, attachments = 0, "", []
+            image_url = next((item["url"] for item in attachments if str(item.get("filename") or item.get("url", "")).lower().split("?")[0].endswith((".png", ".jpg", ".jpeg", ".gif", ".webp"))), None)
+            entries.append((message_id, f"<@{author_id}>: {content or '[no text content]'}", image_url))
+        if not entries:
+            return
+        description = "\n".join(text for _, text, _ in entries)
+        image_url = next((url for _, _, url in entries if url), None)
+        try:
+            delivered = await self._log(guild, "Messages deleted", description, image_url=image_url)
+        except Exception:
+            logger.exception("Could not audit bulk message deletion in guild %s", guild.id)
+            delivered = False
+        for message_id, _, _ in entries:
+            if delivered:
+                await database.mark_message_deleted(message_id)
+            else:
+                await database.release_message_deletion_claim(message_id)
 
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message) -> None:
-        if after.guild is None or (
+        if after.guild is None or after.author.bot or (
             before.content == after.content
             and [(item.url, item.filename) for item in before.attachments]
             == [(item.url, item.filename) for item in after.attachments]
@@ -513,7 +556,7 @@ class Community(commands.Cog):
     @commands.Cog.listener()
     async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent) -> None:
         """Handle edits for messages that were not present in the local cache."""
-        if payload.guild_id is None:
+        if payload.guild_id is None or payload.cached_message is not None:
             return
         channel = self.bot.get_channel(payload.channel_id)
         if not isinstance(channel, discord.TextChannel):
@@ -523,6 +566,8 @@ class Community(commands.Cog):
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             return
         snapshot = await database.get_message_snapshot(message.id)
+        if message.author.bot:
+            return
         current_attachments = json.dumps([{"url": item.url, "filename": item.filename} for item in message.attachments])
         if snapshot and snapshot.get("content", "") == message.content and snapshot.get("attachments", "[]") == current_attachments:
             return
@@ -550,10 +595,12 @@ class Community(commands.Cog):
             return
         starboard = await self._channel(channel.guild, "starboard")
         threshold = int(await database.get_setting(channel.guild.id, "starboard_threshold", 3))
-        if starboard is None:
+        if starboard is None or channel.id == starboard.id:
             return
         try:
             source = await channel.fetch_message(payload.message_id)
+            if source.author.bot:
+                return
             reaction = discord.utils.get(source.reactions, emoji="⭐")
             if reaction is None or reaction.count < threshold or await database.get_starboard_message(channel.guild.id, source.id):
                 return

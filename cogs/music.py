@@ -64,7 +64,7 @@ class Music(commands.Cog):
         refreshed = await asyncio.to_thread(self._extract, track.query)
         return refreshed
 
-    async def _play_next(self, guild_id: int) -> None:
+    async def _play_next(self, guild_id: int, *, refresh_first: bool = True) -> None:
         generation = self.playback_generation.get(guild_id, 0)
         while True:
             guild = self.bot.get_guild(guild_id)
@@ -73,16 +73,20 @@ class Music(commands.Cog):
             if voice is None or not queue:
                 return
             queued_track = queue[0]
-            try:
-                track = await self._refresh_stream_url(queued_track)
-            except Exception as error:
-                logger.warning("Could not refresh music stream in guild %s: %s", guild_id, error)
-                if generation != self.playback_generation.get(guild_id, 0):
-                    return
-                queue = self.queues.get(guild_id, [])
-                if queue and queue[0] is queued_track:
-                    queue.pop(0)
-                continue
+            if refresh_first:
+                try:
+                    track = await self._refresh_stream_url(queued_track)
+                except Exception as error:
+                    logger.warning("Could not refresh music stream in guild %s: %s", guild_id, error)
+                    if generation != self.playback_generation.get(guild_id, 0):
+                        return
+                    queue = self.queues.get(guild_id, [])
+                    if queue and queue[0] is queued_track:
+                        queue.pop(0)
+                    continue
+            else:
+                track = queued_track
+                refresh_first = True
             if generation != self.playback_generation.get(guild_id, 0):
                 return
             queue = self.queues.get(guild_id, [])
@@ -150,8 +154,7 @@ class Music(commands.Cog):
         was_idle = not voice.is_playing() and not voice.is_paused() and not queue
         queue.append(track)
         if was_idle:
-            await self._play_next(ctx.guild.id)
-            await ctx.send(f"▶️ Playing **{track.title}**")
+            await self._play_next(ctx.guild.id, refresh_first=False)
         else:
             await ctx.send(f"➕ Queued **{track.title}** (position {len(queue)}).")
 
@@ -221,6 +224,14 @@ class Music(commands.Cog):
         if ctx.guild.voice_client:
             await ctx.guild.voice_client.disconnect()
         await ctx.send("👋 Left the voice channel.")
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState) -> None:
+        if self.bot.user is None or member.id != self.bot.user.id or before.channel is None or after.channel is not None:
+            return
+        guild_id = member.guild.id
+        self.queues[guild_id] = []
+        self.playback_generation[guild_id] = self.playback_generation.get(guild_id, 0) + 1
 
 
 async def setup(bot: commands.Bot) -> None:

@@ -258,10 +258,11 @@ class Moderation(commands.Cog):
 
     @commands.hybrid_command(name="purge", description="Delete up to 100 recent messages.")
     @commands.guild_only()
-    @commands.has_guild_permissions(moderate_members=True)
+    @commands.has_guild_permissions(manage_messages=True)
     @commands.bot_has_guild_permissions(manage_messages=True)
     async def purge(self, ctx: commands.Context, amount: commands.Range[int, 1, MAX_PURGE]) -> None:
         """Bulk delete recent messages."""
+        await ctx.defer(ephemeral=True)
         deleted = await ctx.channel.purge(limit=amount, reason=f"Purged by {ctx.author} ({ctx.author.id})")
         await self._log_action(ctx, "Purge", details=f"Deleted {len(deleted)} message(s) in {ctx.channel.mention}")
         await ctx.send(f"✅ Deleted {len(deleted)} message(s).", ephemeral=True, delete_after=5)

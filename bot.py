@@ -72,13 +72,13 @@ class osbot(commands.Bot):
         """Apply maintenance mode to prefix commands as well as slash commands."""
         if (
             self.maintenance_mode
-            and settings.OWNER_USER_ID
             and message.author.id != settings.OWNER_USER_ID
         ):
             return
         await super().process_commands(message)
 
     async def setup_hook(self) -> None:
+        await database.setup_database()
         # Load cogs using pathlib's .stem and isolate failures.
         for cog_file in settings.COGS_DIR.glob("*.py"):
             if not cog_file.name.startswith("_"):
@@ -95,8 +95,7 @@ class osbot(commands.Bot):
             await self.tree.sync(guild=dev_guild)
             logger.info(f"Synced commands to dev guild {settings.DEV_GUILD_ID}")
         else:
-            await self.tree.sync()
-            logger.info("Synced application commands globally")
+            logger.info("Skipped global command sync on startup; use the owner-only /sync command when ready")
 
     async def on_ready(self) -> None:
         # Discord is fully connected here; defer database creation until this point.
@@ -113,6 +112,11 @@ class osbot(commands.Bot):
     async def close(self) -> None:
         await database.close_database()
         await super().close()
+
+    async def on_guild_available(self, guild: discord.Guild) -> None:
+        if not database.is_initialized():
+            await database.setup_database()
+        await database.sync_guild_members(guild)
 
 if __name__ == "__main__":
     # discord.py automatically configures the root logger when using bot.run()

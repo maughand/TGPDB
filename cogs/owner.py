@@ -6,7 +6,6 @@ import asyncio
 import datetime as dt
 import logging
 import platform
-import shutil
 
 import discord
 from discord import app_commands
@@ -180,7 +179,7 @@ class OwnerCommands(commands.Cog):
         backup_dir.mkdir(exist_ok=True)
         timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
         destination = backup_dir / f"tgpdb-{timestamp}.sqlite3"
-        shutil.copy2(settings.DATABASE_PATH, destination)
+        await database.backup_database(destination)
         await self._send_result(interaction, f"Database backup created: `{destination.name}`.")
 
     @app_commands.command(name="database_health", description="Check database initialization health.")
@@ -225,6 +224,7 @@ class OwnerCommands(commands.Cog):
     async def announce_update(self, interaction: discord.Interaction, message: str) -> None:
         if await self._deny_or_defer(interaction):
             return
+        await interaction.response.defer(ephemeral=True, thinking=True)
         sent = 0
         for guild in self.bot.guilds:
             channel_id = await database.get_channel(guild.id, "announcements")

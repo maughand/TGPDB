@@ -245,7 +245,7 @@ class ReactionRoles(commands.Cog):
     @commands.Cog.listener()
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError) -> None:
         if ctx.cog is self and isinstance(error, commands.MissingPermissions):
-            await ctx.send("❌ You need Manage Server to configure reaction roles.", ephemeral=True)
+            await ctx.send("❌ You need Manage Roles to configure reaction roles.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

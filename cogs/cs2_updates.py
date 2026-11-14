@@ -134,6 +134,7 @@ class CounterStrikeUpdateChecker(commands.Cog):
 
     @commands.hybrid_command(name="last_update", description="Show the latest Counter-Strike 2 update known to the bot.")
     async def last_update(self, ctx: commands.Context) -> None:
+        await ctx.defer(ephemeral=True)
         latest = await self.fetch_latest_update()
         if not latest:
             await ctx.send("❌ I could not reach the Counter-Strike update feed.", ephemeral=True)

@@ -185,7 +185,7 @@ class ServerTools(commands.Cog):
         embed.add_field(name="XP", value=f"{xp['xp'] if xp else 0:,}", inline=True)
         embed.add_field(name="Level", value=str(xp["level"] if xp else 0), inline=True)
         embed.add_field(name="Roles", value=str(max(0, len(ctx.author.roles) - 1)), inline=True)
-        embed.add_field(name="Recorded warnings/actions", value=str(summary["mute_count"] + summary["ban_count"] + summary["softban_count"] if summary else 0), inline=True)
+        embed.add_field(name="Recorded warnings/actions", value=str(sum(summary[key] for key in ("warn_count", "kick_count", "mute_count", "ban_count", "softban_count")) if summary else 0), inline=True)
         await self._private_response(ctx, embed=embed)
 
     @assistant.command(name="infractions", description="View your private infraction summary.")
@@ -195,7 +195,7 @@ class ServerTools(commands.Cog):
         text = "\n".join(f"{row['action']} — {row['reason'] or 'No reason'}" for row in actions[-10:]) or "No recorded actions."
         embed = discord.Embed(title="Your infractions", description=text[:4096], colour=discord.Colour.orange())
         if summary:
-            embed.set_footer(text=f"Mutes: {summary['mute_count']} · Bans: {summary['ban_count']} · Softbans: {summary['softban_count']}")
+            embed.set_footer(text=f"Warnings: {summary['warn_count']} · Kicks: {summary['kick_count']} · Mutes: {summary['mute_count']} · Bans: {summary['ban_count']} · Softbans: {summary['softban_count']}")
         await self._private_response(ctx, embed=embed)
 
 

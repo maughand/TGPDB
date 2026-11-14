@@ -18,7 +18,8 @@ def _command_entries(bot: commands.Bot) -> list[tuple[str, str, str]]:
     """Return unique application commands as (name, description, header) tuples."""
     entries: dict[str, tuple[str, str]] = {}
     for command in bot.tree.walk_commands():
-        if getattr(command, "hidden", False):
+        binding = getattr(command, "binding", None)
+        if getattr(command, "hidden", False) or binding.__class__.__name__ == "OwnerCommands":
             continue
         name = command.qualified_name
         description = getattr(command, "description", None) or "No description provided."

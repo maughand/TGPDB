@@ -1,0 +1,51 @@
+services:
+  bot:
+    build:
+      context: .
+    container_name: tgpdb-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Keep bot-to-Cobalt traffic inside the Compose network.
+      COBALT_REQUEST_URL: http://cobalt:9000/
+      DATABASE_PATH: /app/data/tgpdb.sqlite3
+    depends_on:
+      cobalt:
+        condition: service_started
+    volumes:
+      - tgpdb_data:/app/data
+    networks:
+      - tgpdb
+
+  cobalt:
+    image: ghcr.io/imputnet/cobalt:11
+    container_name: tgpdb-cobalt
+    init: true
+    read_only: true
+    restart: unless-stopped
+    expose:
+      - "9000"
+    environment:
+      # This must be the public Cloudflare hostname so generated tunnel URLs work.
+      API_URL: ${COBALT_API_URL:?Set COBALT_API_URL in .env}
+    networks:
+      - tgpdb
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: tgpdb-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARED_TUNNEL_TOKEN:?Set CLOUDFLARED_TUNNEL_TOKEN in .env}
+    depends_on:
+      cobalt:
+        condition: service_started
+    networks:
+      - tgpdb
+
+networks:
+  tgpdb:
+    driver: bridge
+
+volumes:
+  tgpdb_data:

@@ -1,0 +1,57 @@
+name: CI Test & Deploy to Mac Server
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Run Backend Pytest Suite
+    runs-on: ubuntu-latest
+    env:
+      BOT_TOKEN: ci-test-token
+      DEV_GUILD_ID: "123456789012345678"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Run pytest
+        run: pytest -q
+
+  deploy:
+    name: Pull & Rebuild Docker on Mac Server
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: self-hosted
+    steps:
+      - name: Pull latest code and rebuild Docker containers
+        env:
+          DEPLOY_PATH: /Users/maughandmacmini/Desktop/TGPDB
+          DOCKER_BIN: /Applications/Docker.app/Contents/Resources/bin/docker
+        run: |
+          cd "$DEPLOY_PATH"
+          git -c credential.helper= fetch "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" main
+          git reset --hard "${{ github.sha }}"
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          "$DOCKER_BIN" compose up -d --build --remove-orphans
+          "$DOCKER_BIN" image prune -f

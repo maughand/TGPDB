@@ -41,12 +41,53 @@ class CounterStrikeUpdateChecker(commands.Cog):
     @staticmethod
     def parse_patch_note_body(text: str) -> str:
         text = text.replace("\r\n", "\n").replace("\r", "\n")
-        text = text.replace("[list]", "").replace("[/list]", "").replace("[*]", "- ").strip()
-        text = re.sub(r'\[url=(["\']?)(.*?)\1\](.*?)\[/url\]', r'[\3](\2)', text)
-        text = re.sub(r"\[/?p\]|\[/?\*\]|\[/\]", "", text)
+        # Convert BBCode links: [url=https://...]Label[/url] -> [Label](https://...)
+        text = re.sub(r'\[url=(["\']?)(.*?)\1\](.*?)\[/url\]', r"[\3](\2)", text, flags=re.IGNORECASE)
+        # Convert inline formatting tags
+        text = re.sub(r"\[h[1-3]\](.*?)\[/h[1-3]\]", r"\n**\1**\n", text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r"\[b\](.*?)\[/b\]", r"**\1**", text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r"\[i\](.*?)\[/i\]", r"*\1*", text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r"\[u\](.*?)\[/u\]", r"__\1__", text, flags=re.IGNORECASE | re.DOTALL)
+        # Replace paragraph and list containers with newlines so blocks don't collapse
+        text = re.sub(r"\[/?(?:p|list|olist)\]", "\n", text, flags=re.IGNORECASE)
+        # Put each list item on its own Markdown bullet line
+        text = re.sub(r"\s*\[\*\]\s*", "\n- ", text)
+        text = re.sub(r"\[/\*\]|\[/\]", "", text)
+        # Unescape escaped brackets (e.g., \[ ANIMATION \])
         text = re.sub(r"\\([\[\]])", r"\1", text)
+        # Normalize section headers like [ ANIMATION ] into **[ANIMATION]** on their own line
+        text = re.sub(
+            r"(?:\*\*)?\[\s*([A-Z0-9][A-Z0-9 _/&+-]*?)\s*\](?:\*\*)?(?!\()",
+            lambda m: f"\n\n**[{m.group(1).strip()}]**\n",
+            text,
+        )
+        # Clean up whitespace and keep bullets directly underneath their section header
+        text = re.sub(r"[ \t]+\n", "\n", text)
         text = re.sub(r"\n{3,}", "\n\n", text)
+        text = re.sub(r"(\*\*\[[^\n]+\]\*\*)\n\n(-\s)", r"\1\n\2", text)
         return text.strip()
+
+    @staticmethod
+    def _chunk_text(text: str, limit: int = 3900) -> list[str]:
+        if not text:
+            return ["No patch notes were provided."]
+        chunks: list[str] = []
+        current = ""
+        for line in text.splitlines(keepends=True):
+            if len(line) > limit:
+                if current:
+                    chunks.append(current.strip())
+                    current = ""
+                for i in range(0, len(line), limit):
+                    chunks.append(line[i : i + limit].strip())
+            elif len(current) + len(line) > limit:
+                chunks.append(current.strip())
+                current = line
+            else:
+                current += line
+        if current.strip():
+            chunks.append(current.strip())
+        return chunks or ["No patch notes were provided."]
 
     async def fetch_latest_update(self) -> dict[str, Any] | None:
         timeout = aiohttp.ClientTimeout(total=20)
@@ -73,7 +114,7 @@ class CounterStrikeUpdateChecker(commands.Cog):
             update_id = str(event.get("gid") or event.get("event_gid") or release)
             return {
                 "id": update_id,
-                "title": announcement.get("headline") or "Counter-Strike 2 update",
+                "title": announcement.get("headline") or "Counter-Strike 2 Update",
                 "description": self.parse_patch_note_body(announcement.get("body") or "No patch notes were provided."),
                 "release": release,
                 "url": "https://www.counter-strike.net/news/updates",
@@ -117,10 +158,14 @@ class CounterStrikeUpdateChecker(commands.Cog):
         return sent
 
     async def _send_update(self, channel: discord.TextChannel, update: dict[str, Any]) -> bool:
-        text = update["description"]
-        chunks = [text[index:index + 3900] for index in range(0, len(text), 3900)] or ["No patch notes were provided."]
+        chunks = self._chunk_text(update["description"])
         try:
             for index, chunk in enumerate(chunks):
+                footer = (
+                    "Counter-Strike 2 Patch Notes"
+                    if len(chunks) == 1
+                    else f"Counter-Strike 2 Patch Notes · Part {index + 1}/{len(chunks)}"
+                )
                 embed = discord.Embed(
                     title=update["title"] if index == 0 else f"{update['title']} (continued)",
                     description=chunk,
@@ -128,7 +173,7 @@ class CounterStrikeUpdateChecker(commands.Cog):
                     colour=discord.Colour.gold(),
                     timestamp=datetime.fromtimestamp(update["release"], tz=timezone.utc),
                 )
-                embed.set_footer(text=f"Counter-Strike 2 patch notes · Part {index + 1}/{len(chunks)}")
+                embed.set_footer(text=footer)
                 await channel.send(embed=embed)
         except discord.HTTPException:
             return False
@@ -140,19 +185,25 @@ class CounterStrikeUpdateChecker(commands.Cog):
     async def check_update(self, ctx: commands.Context) -> None:
         await ctx.defer(ephemeral=True)
         changed = await self.check_for_update_once()
-        await ctx.send("✅ Checked for updates." if changed else "✅ No new update was found.", ephemeral=True)
+        await ctx.send("Checked for updates." if changed else "No new update was found.", ephemeral=True)
 
     @commands.hybrid_command(name="last_update", description="Show the latest Counter-Strike 2 update known to the bot.")
     async def last_update(self, ctx: commands.Context) -> None:
         await ctx.defer(ephemeral=True)
         latest = await self.fetch_latest_update()
         if not latest:
-            await ctx.send("❌ I could not reach the Counter-Strike update feed.", ephemeral=True)
+            await ctx.send("I could not reach the Counter-Strike update feed.", ephemeral=True)
             return
-        await ctx.send(
-            embed=discord.Embed(title=latest["title"], description=latest["description"][:4096], url=latest["url"], colour=discord.Colour.gold()),
-            ephemeral=True,
+        embed = discord.Embed(
+            title=latest["title"],
+            description=latest["description"][:4096],
+            url=latest["url"],
+            colour=discord.Colour.gold(),
+            timestamp=datetime.fromtimestamp(latest["release"], tz=timezone.utc) if latest.get("release") else None,
         )
+        embed.set_footer(text="Counter-Strike 2 Patch Notes")
+        await ctx.send(embed=embed, ephemeral=True)
+
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(CounterStrikeUpdateChecker(bot))

@@ -41,12 +41,12 @@ class MessageReferenceModal(discord.ui.Modal, title="Reaction-role message"):
         await interaction.response.defer()
         channel_id, message_id = _message_reference(str(self.reference.value))
         if message_id is None:
-            await interaction.followup.send("❌ That is not a valid message ID or Discord message link.", ephemeral=True)
+            await interaction.followup.send("That is not a valid message ID or Discord message link.", ephemeral=True)
             return
         message = await self.panel.find_message(channel_id, message_id)
         if message is None:
             await interaction.followup.send(
-                "❌ I could not find that message. A raw ID must be in a text channel I can read; a message link is preferred.",
+                "I could not find that message. A raw ID must be in a text channel I can read; a message link is preferred.",
                 ephemeral=True,
             )
             return
@@ -137,18 +137,18 @@ class ReactionRolePanel(discord.ui.View):
 
     async def _save(self, interaction: discord.Interaction) -> None:
         if self.message_id is None or self.channel_id is None:
-            await interaction.response.send_message("❌ Choose a target message first.", ephemeral=True)
+            await interaction.response.send_message("Choose a target message first.", ephemeral=True)
             return
         if not self.selected_roles:
-            await interaction.response.send_message("❌ Select at least one role first.", ephemeral=True)
+            await interaction.response.send_message("Select at least one role first.", ephemeral=True)
             return
         bot_member = self.guild.me
         if bot_member is None:
-            await interaction.response.send_message("❌ I could not determine my role permissions in this server.", ephemeral=True)
+            await interaction.response.send_message("I could not determine my role permissions in this server.", ephemeral=True)
             return
         moderator = self.guild.get_member(self.user_id)
         if moderator is None or not moderator.guild_permissions.manage_roles:
-            await interaction.response.send_message("❌ You need Manage Roles to configure reaction roles.", ephemeral=True)
+            await interaction.response.send_message("You need Manage Roles to configure reaction roles.", ephemeral=True)
             return
         manageable = [
             role
@@ -160,13 +160,13 @@ class ReactionRolePanel(discord.ui.View):
         ]
         if len(manageable) != len(self.selected_roles):
             await interaction.response.send_message(
-                "❌ Every selected role must be below both your highest role and my highest role. Managed roles are not supported.",
+                "Every selected role must be below both your highest role and my highest role. Managed roles are not supported.",
                 ephemeral=True,
             )
             return
         channel = self.guild.get_channel(self.channel_id)
         if not isinstance(channel, discord.TextChannel):
-            await interaction.response.send_message("❌ The target channel is no longer available.", ephemeral=True)
+            await interaction.response.send_message("The target channel is no longer available.", ephemeral=True)
             return
         await interaction.response.defer()
         try:
@@ -177,7 +177,7 @@ class ReactionRolePanel(discord.ui.View):
                 await message.add_reaction(emoji)
         except (discord.Forbidden, discord.NotFound, discord.HTTPException):
             await interaction.followup.send(
-                "❌ I could not update that message. Check that I can view it, add reactions, and manage the selected roles.",
+                "I could not update that message. Check that I can view it, add reactions, and manage the selected roles.",
                 ephemeral=True,
             )
             return
@@ -245,7 +245,7 @@ class ReactionRoles(commands.Cog):
     @commands.Cog.listener()
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError) -> None:
         if ctx.cog is self and isinstance(error, commands.MissingPermissions):
-            await ctx.send("❌ You need Manage Roles to configure reaction roles.", ephemeral=True)
+            await ctx.send("You need Manage Roles to configure reaction roles.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

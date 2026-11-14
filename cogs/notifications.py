@@ -216,23 +216,23 @@ class Notifications(commands.Cog):
     async def notify_add(self, ctx: commands.Context, platform: str, identifier: str, channel: discord.TextChannel) -> None:
         platform = platform.casefold()
         if platform not in SUPPORTED_PLATFORMS:
-            await ctx.send("❌ Platform must be `youtube`, `twitch`, or `kick`.", ephemeral=True)
+            await ctx.send("Platform must be `youtube`, `twitch`, or `kick`.", ephemeral=True)
             return
         identifier = identifier.strip().removeprefix("@").rstrip("/")
         if platform == "youtube" and not identifier.startswith("UC"):
-            await ctx.send("❌ YouTube currently requires the channel ID, such as `UC...`.", ephemeral=True)
+            await ctx.send("YouTube currently requires the channel ID, such as `UC...`.", ephemeral=True)
             return
         await database.add_notification_subscription(
             ctx.guild.id, platform, identifier, identifier, channel.id, ctx.author.id
         )
-        await ctx.send(f"✅ Added {platform} notifications for `{identifier}` in {channel.mention}.", ephemeral=True)
+        await ctx.send(f"Added {platform} notifications for `{identifier}` in {channel.mention}.", ephemeral=True)
 
     @notify.command(name="remove", description="Remove a creator notification subscription.")
     async def notify_remove(self, ctx: commands.Context, platform: str, identifier: str) -> None:
         removed = await database.remove_notification_subscription(
             ctx.guild.id, platform.casefold(), identifier.strip().removeprefix("@").rstrip("/")
         )
-        await ctx.send("✅ Subscription removed." if removed else "❌ Subscription not found.", ephemeral=True)
+            await ctx.send("Subscription removed." if removed else "Subscription not found.", ephemeral=True)
 
     @notify.command(name="list", description="List this server's notification subscriptions.")
     async def notify_list(self, ctx: commands.Context) -> None:
@@ -246,7 +246,7 @@ class Notifications(commands.Cog):
     @commands.Cog.listener()
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError) -> None:
         if ctx.cog is self and isinstance(error, commands.MissingPermissions):
-            await ctx.send("❌ You need Manage Server to change notification subscriptions.", ephemeral=True)
+            await ctx.send("You need Manage Server to change notification subscriptions.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

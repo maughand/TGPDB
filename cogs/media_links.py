@@ -90,7 +90,7 @@ class MediaLinks(commands.Cog):
 
     async def _process_url(self, message: discord.Message, source_url: str) -> None:
         async with DOWNLOAD_SEMAPHORE:
-            status_message = await message.channel.send("⏳ Resolving media link…")
+            status_message = await message.channel.send("Resolving media link…")
             try:
                 result = await self._resolve(source_url)
                 # The media URL is sent to Discord rather than downloaded by the bot.
@@ -99,7 +99,7 @@ class MediaLinks(commands.Cog):
                 await status_message.delete()
             except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as error:
                 logger.warning("Media link resolution failed for %s: %s", source_url, error)
-                await status_message.edit(content="❌ I could not resolve that media link. It may be private, unavailable, or unsupported.")
+                await status_message.edit(content="I could not resolve that media link. It may be private, unavailable, or unsupported.")
             except discord.HTTPException:
                 logger.warning("Could not send the resolved media link for %s", source_url)
 

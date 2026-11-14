@@ -144,15 +144,15 @@ class Community(commands.Cog):
     async def welcome_set(self, ctx: commands.Context, *, message: str) -> None:
         error = _validate_message_template(message)
         if error:
-            await ctx.send(f"❌ {error}", ephemeral=True)
+            await ctx.send(str(error), ephemeral=True)
             return
         await database.set_setting(ctx.guild.id, "welcome_message", message[:2000])
-        await ctx.send("✅ Welcome message saved. Use `{user}`, `{username}`, `{server}`, and `{member_count}`.", ephemeral=True)
+        await ctx.send("Welcome message saved. Use `{user}`, `{username}`, `{server}`, and `{member_count}`.", ephemeral=True)
 
     @welcome.command(name="disable", description="Disable welcome messages.")
     async def welcome_disable(self, ctx: commands.Context) -> None:
         await database.set_setting(ctx.guild.id, "welcome_message", None)
-        await ctx.send("✅ Welcome messages disabled.", ephemeral=True)
+        await ctx.send("Welcome messages disabled.", ephemeral=True)
 
     @welcome.command(name="preview", description="Preview the configured welcome message.")
     async def welcome_preview(self, ctx: commands.Context) -> None:
@@ -170,15 +170,15 @@ class Community(commands.Cog):
     async def farewell_set(self, ctx: commands.Context, *, message: str) -> None:
         error = _validate_message_template(message)
         if error:
-            await ctx.send(f"❌ {error}", ephemeral=True)
+            await ctx.send(str(error), ephemeral=True)
             return
         await database.set_setting(ctx.guild.id, "farewell_message", message[:2000])
-        await ctx.send("✅ Farewell message saved.", ephemeral=True)
+        await ctx.send("Farewell message saved.", ephemeral=True)
 
     @farewell.command(name="disable", description="Disable farewell messages.")
     async def farewell_disable(self, ctx: commands.Context) -> None:
         await database.set_setting(ctx.guild.id, "farewell_message", None)
-        await ctx.send("✅ Farewell messages disabled.", ephemeral=True)
+        await ctx.send("Farewell messages disabled.", ephemeral=True)
 
     @commands.hybrid_group(name="autorole", description="Configure the role assigned to new members.")
     @commands.guild_only()
@@ -190,18 +190,18 @@ class Community(commands.Cog):
     @autorole.command(name="set", description="Assign a role automatically when members join.")
     async def autorole_set(self, ctx: commands.Context, role: discord.Role) -> None:
         if ctx.guild.me is None or role >= ctx.guild.me.top_role or role.is_default() or role.managed:
-            await ctx.send("❌ I can only assign a normal role below my highest role.", ephemeral=True)
+            await ctx.send("I can only assign a normal role below my highest role.", ephemeral=True)
             return
         if ctx.author != ctx.guild.owner and role >= ctx.author.top_role:
-            await ctx.send("❌ You cannot configure a role at or above your highest role.", ephemeral=True)
+            await ctx.send("You cannot configure a role at or above your highest role.", ephemeral=True)
             return
         await database.set_setting(ctx.guild.id, "autorole_id", role.id)
-        await ctx.send(f"✅ New members will receive {role.mention}.", ephemeral=True)
+        await ctx.send(f"New members will receive {role.mention}.", ephemeral=True)
 
     @autorole.command(name="clear", description="Disable automatic roles.")
     async def autorole_clear(self, ctx: commands.Context) -> None:
         await database.set_setting(ctx.guild.id, "autorole_id", None)
-        await ctx.send("✅ Autorole disabled.", ephemeral=True)
+        await ctx.send("Autorole disabled.", ephemeral=True)
 
     @commands.hybrid_group(name="automod", description="Configure automod; it is disabled by default.")
     @commands.guild_only()
@@ -214,12 +214,12 @@ class Community(commands.Cog):
     @automod.command(name="enable", description="Enable basic spam, invite, and word automod.")
     async def automod_enable(self, ctx: commands.Context) -> None:
         await database.set_setting(ctx.guild.id, "automod_enabled", True)
-        await ctx.send("✅ Automod enabled.", ephemeral=True)
+        await ctx.send("Automod enabled.", ephemeral=True)
 
     @automod.command(name="disable", description="Disable automod.")
     async def automod_disable(self, ctx: commands.Context) -> None:
         await database.set_setting(ctx.guild.id, "automod_enabled", False)
-        await ctx.send("✅ Automod disabled.", ephemeral=True)
+        await ctx.send("Automod disabled.", ephemeral=True)
 
     @automod.command(name="word", description="Add a blocked word or phrase.")
     async def automod_word(self, ctx: commands.Context, *, word: str) -> None:
@@ -228,7 +228,7 @@ class Community(commands.Cog):
         if word.casefold() not in [str(item).casefold() for item in words]:
             words.append(word.strip()[:100])
         await database.set_setting(ctx.guild.id, "automod_words", words[:100])
-        await ctx.send("✅ Automod word added.", ephemeral=True)
+        await ctx.send("Automod word added.", ephemeral=True)
 
     @commands.hybrid_group(name="antiraid", description="Configure join-burst protection; disabled by default.")
     @commands.guild_only()
@@ -241,12 +241,12 @@ class Community(commands.Cog):
     @antiraid.command(name="enable", description="Enable join-burst protection.")
     async def antiraid_enable(self, ctx: commands.Context) -> None:
         await database.set_setting(ctx.guild.id, "antiraid_enabled", True)
-        await ctx.send("✅ Anti-raid enabled. Five joins in 30 seconds will trigger protection.", ephemeral=True)
+        await ctx.send("Anti-raid enabled. Five joins in 30 seconds will trigger protection.", ephemeral=True)
 
     @antiraid.command(name="disable", description="Disable join-burst protection.")
     async def antiraid_disable(self, ctx: commands.Context) -> None:
         await database.set_setting(ctx.guild.id, "antiraid_enabled", False)
-        await ctx.send("✅ Anti-raid disabled.", ephemeral=True)
+        await ctx.send("Anti-raid disabled.", ephemeral=True)
 
     @commands.hybrid_group(name="schedule", description="Schedule messages for this server.")
     @commands.guild_only()
@@ -274,7 +274,7 @@ class Community(commands.Cog):
             repeat_minutes or None,
             ctx.author.id,
         )
-        await ctx.send(f"✅ Scheduled message `#{schedule_id}` for {channel.mention}.", ephemeral=True)
+        await ctx.send(f"Scheduled message `#{schedule_id}` for {channel.mention}.", ephemeral=True)
 
     @schedule.command(name="list", description="List scheduled messages.")
     async def schedule_list(self, ctx: commands.Context) -> None:
@@ -285,7 +285,7 @@ class Community(commands.Cog):
     @schedule.command(name="remove", description="Remove a scheduled message.")
     async def schedule_remove(self, ctx: commands.Context, schedule_id: int) -> None:
         removed = await database.remove_scheduled_message(ctx.guild.id, schedule_id)
-        await ctx.send("✅ Schedule removed." if removed else "❌ Schedule not found.", ephemeral=True)
+        await ctx.send("Schedule removed." if removed else "Schedule not found.", ephemeral=True)
 
     @commands.hybrid_group(name="starboard", description="Configure message highlights.")
     @commands.guild_only()
@@ -298,12 +298,12 @@ class Community(commands.Cog):
     async def starboard_set(self, ctx: commands.Context, channel: discord.TextChannel, threshold: commands.Range[int, 1, 100] = 3) -> None:
         await database.set_channel(ctx.guild.id, "starboard", channel.id)
         await database.set_setting(ctx.guild.id, "starboard_threshold", threshold)
-        await ctx.send(f"✅ Starboard set to {channel.mention} at {threshold} ⭐ reactions.", ephemeral=True)
+        await ctx.send(f"Starboard set to {channel.mention} at {threshold} reactions.", ephemeral=True)
 
     @starboard.command(name="disable", description="Disable the starboard.")
     async def starboard_disable(self, ctx: commands.Context) -> None:
         await database.set_channel(ctx.guild.id, "starboard", None)
-        await ctx.send("✅ Starboard disabled.", ephemeral=True)
+        await ctx.send("Starboard disabled.", ephemeral=True)
 
     @commands.hybrid_group(name="levels", description="Configure XP levels and role rewards.")
     @commands.guild_only()
@@ -316,25 +316,25 @@ class Community(commands.Cog):
     @commands.has_guild_permissions(manage_guild=True)
     async def levels_enable(self, ctx: commands.Context) -> None:
         await database.set_setting(ctx.guild.id, "levels_enabled", True)
-        await ctx.send("✅ XP levels enabled.", ephemeral=True)
+        await ctx.send("XP levels enabled.", ephemeral=True)
 
     @levels.command(name="disable", description="Disable XP levels for this server.")
     @commands.has_guild_permissions(manage_guild=True)
     async def levels_disable(self, ctx: commands.Context) -> None:
         await database.set_setting(ctx.guild.id, "levels_enabled", False)
-        await ctx.send("✅ XP levels disabled.", ephemeral=True)
+        await ctx.send("XP levels disabled.", ephemeral=True)
 
     @levels.command(name="reward", description="Give a role when members reach a level.")
     @commands.has_guild_permissions(manage_roles=True)
     async def levels_reward(self, ctx: commands.Context, level: commands.Range[int, 1, 1000], role: discord.Role) -> None:
         if ctx.guild.me is None or role >= ctx.guild.me.top_role or role.managed:
-            await ctx.send("❌ I cannot assign that role.", ephemeral=True)
+            await ctx.send("I cannot assign that role.", ephemeral=True)
             return
         if ctx.author != ctx.guild.owner and role >= ctx.author.top_role:
-            await ctx.send("❌ You cannot configure a role at or above your highest role.", ephemeral=True)
+            await ctx.send("You cannot configure a role at or above your highest role.", ephemeral=True)
             return
         await database.set_level_reward(ctx.guild.id, level, role.id)
-        await ctx.send(f"✅ Level {level} now awards {role.mention}.", ephemeral=True)
+        await ctx.send(f"Level {level} now awards {role.mention}.", ephemeral=True)
 
     @levels.command(name="leaderboard", description="Show the server XP leaderboard.")
     async def levels_leaderboard(self, ctx: commands.Context) -> None:
@@ -362,9 +362,9 @@ class Community(commands.Cog):
         else:
             try:
                 await ctx.author.send(embed=embed)
-                await ctx.send("✅ I sent your infraction summary by DM.", delete_after=8)
+                await ctx.send("I sent your infraction summary by DM.", delete_after=8)
             except discord.Forbidden:
-                await ctx.send("❌ I could not DM you your private infraction summary.", delete_after=8)
+                await ctx.send("I could not DM you your private infraction summary.", delete_after=8)
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
@@ -466,7 +466,7 @@ class Community(commands.Cog):
             None,
         )
         attachment_text = "\n".join(
-            f"📎 {item.get('filename') or 'attachment'}: {item.get('url')}"
+            f"Attachment: {item.get('filename') or 'attachment'}: {item.get('url')}"
             for item in attachments
             if item.get("url")
         )

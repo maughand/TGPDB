@@ -16,10 +16,10 @@ class ImageTools(commands.Cog):
     async def to_gif(self, ctx: commands.Context, image: discord.Attachment) -> None:
         await ctx.defer()
         if image.content_type and not image.content_type.startswith("image/"):
-            await ctx.send("❌ Please upload an image file.", ephemeral=True)
+            await ctx.send("Please upload an image file.", ephemeral=True)
             return
         if image.size > 10 * 1024 * 1024:
-            await ctx.send("❌ Please keep the image under 10 MB.", ephemeral=True)
+            await ctx.send("Please keep the image under 10 MB.", ephemeral=True)
             return
         try:
             source = Image.open(BytesIO(await image.read()))
@@ -28,7 +28,7 @@ class ImageTools(commands.Cog):
             frame.save(output, format="GIF", save_all=True, loop=0, disposal=2)
             output.seek(0)
         except (UnidentifiedImageError, OSError):
-            await ctx.send("❌ I could not decode that image.", ephemeral=True)
+            await ctx.send("I could not decode that image.", ephemeral=True)
             return
         await ctx.send(file=discord.File(output, filename=f"{image.filename.rsplit('.', 1)[0]}.gif"))
 

@@ -39,9 +39,9 @@ class ServerTools(commands.Cog):
             return
         try:
             await ctx.author.send(content, embed=embed)
-            await ctx.send("✅ I sent the private result to your DMs.", delete_after=8)
+            await ctx.send("I sent the private result to your DMs.", delete_after=8)
         except discord.Forbidden:
-            await ctx.send("❌ I could not DM you. Enable DMs from server members and try again.", delete_after=8)
+            await ctx.send("I could not DM you. Enable DMs from server members and try again.", delete_after=8)
 
     async def _analytics_channel(self, guild: discord.Guild) -> Optional[discord.TextChannel]:
         channel_id = await database.get_channel(guild.id, "analytics")
@@ -115,13 +115,13 @@ class ServerTools(commands.Cog):
     @commands.has_guild_permissions(manage_guild=True)
     async def health_enable(self, ctx: commands.Context) -> None:
         await database.set_setting(ctx.guild.id, "health_dashboard_enabled", True)
-        await ctx.send("✅ Daily health dashboard posts enabled.", ephemeral=True)
+            await ctx.send("Daily health dashboard posts enabled.", ephemeral=True)
 
     @health.command(name="disable", description="Disable daily server health posts.")
     @commands.has_guild_permissions(manage_guild=True)
     async def health_disable(self, ctx: commands.Context) -> None:
         await database.set_setting(ctx.guild.id, "health_dashboard_enabled", False)
-        await ctx.send("✅ Daily health dashboard posts disabled.", ephemeral=True)
+            await ctx.send("Daily health dashboard posts disabled.", ephemeral=True)
 
     @commands.hybrid_group(name="incident", description="Manage private moderation incident timelines.")
     @commands.guild_only()
@@ -133,7 +133,7 @@ class ServerTools(commands.Cog):
     @incident.command(name="open", description="Open a new incident case.")
     async def incident_open(self, ctx: commands.Context, *, title: str) -> None:
         case_id = await database.create_incident_case(ctx.guild.id, title, ctx.author.id)
-        await self._private_response(ctx, f"✅ Incident `#{case_id}` opened: **{title[:200]}**")
+        await self._private_response(ctx, f"Incident `#{case_id}` opened: **{title[:200]}**")
 
     @incident.command(name="add", description="Add evidence text or an attachment to an incident.")
     async def incident_add(self, ctx: commands.Context, case_id: int, evidence: str, attachment: Optional[discord.Attachment] = None) -> None:
@@ -146,21 +146,21 @@ class ServerTools(commands.Cog):
             attachment.url if attachment else None,
         )
         if item_id is None:
-            await self._private_response(ctx, "❌ That incident does not exist in this server.")
+            await self._private_response(ctx, "That incident does not exist in this server.")
             return
-        await self._private_response(ctx, f"✅ Evidence `#{item_id}` added to incident `#{case_id}`.")
+        await self._private_response(ctx, f"Evidence `#{item_id}` added to incident `#{case_id}`.")
 
     @incident.command(name="view", description="View an incident timeline and evidence.")
     async def incident_view(self, ctx: commands.Context, case_id: int) -> None:
         case = await database.get_incident_case(ctx.guild.id, case_id)
         if case is None:
-            await self._private_response(ctx, "❌ Incident not found.")
+            await self._private_response(ctx, "Incident not found.")
             return
         evidence = await database.get_incident_evidence(ctx.guild.id, case_id)
         lines = [f"`{item['created_at'][:19]}` {item['content']}" for item in evidence]
         for item in evidence:
             if item["attachment_url"]:
-                lines.append(f"📎 {item['attachment_url']}")
+                lines.append(f"Attachment: {item['attachment_url']}")
         embed = discord.Embed(title=f"Incident #{case_id} · {case['title']}", description="\n".join(lines)[:4096] or "No evidence recorded.", colour=discord.Colour.orange())
         embed.add_field(name="Status", value=str(case["status"]).title())
         embed.add_field(name="Opened by", value=f"<@{case['opened_by']}>")
@@ -169,7 +169,7 @@ class ServerTools(commands.Cog):
     @incident.command(name="close", description="Close an incident case.")
     async def incident_close(self, ctx: commands.Context, case_id: int) -> None:
         closed = await database.close_incident_case(ctx.guild.id, case_id)
-        await self._private_response(ctx, "✅ Incident closed." if closed else "❌ Open incident not found.")
+        await self._private_response(ctx, "Incident closed." if closed else "Open incident not found.")
 
     @commands.hybrid_group(name="assistant", description="Private personal server tools.")
     @commands.guild_only()

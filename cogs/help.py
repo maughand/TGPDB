@@ -135,27 +135,27 @@ class Help(commands.Cog):
         command = command.strip().removeprefix("/").casefold()
         available = {name.casefold() for name, _, _ in _command_entries(self.bot)}
         if command not in available:
-            await ctx.send(f"❌ I could not find `/{command}`. Use `/help` to see available commands.", ephemeral=True)
+            await ctx.send(f"I could not find `/{command}`. Use `/help` to see available commands.", ephemeral=True)
             return
         headers = await self._headers(ctx.guild.id)
         headers[command] = header.strip()[:80] or DEFAULT_HEADER
         await database.set_setting(ctx.guild.id, HELP_HEADERS_SETTING, headers)
-        await ctx.send(f"✅ `/{command}` is now listed under **{headers[command]}**.", ephemeral=True)
+        await ctx.send(f"`/{command}` is now listed under **{headers[command]}**.", ephemeral=True)
 
     @help_config.command(name="remove", description="Return a command to the default help header.")
     async def remove(self, ctx: commands.Context, command: str) -> None:
         command = command.strip().removeprefix("/").casefold()
         headers = await self._headers(ctx.guild.id)
         if headers.pop(command, None) is None:
-            await ctx.send(f"❌ `/{command}` has no custom header.", ephemeral=True)
+            await ctx.send(f"`/{command}` has no custom header.", ephemeral=True)
             return
         await database.set_setting(ctx.guild.id, HELP_HEADERS_SETTING, headers)
-        await ctx.send(f"✅ `/{command}` was returned to **{DEFAULT_HEADER}**.", ephemeral=True)
+        await ctx.send(f"`/{command}` was returned to **{DEFAULT_HEADER}**.", ephemeral=True)
 
     @help_config.command(name="clear", description="Clear all custom help headers for this server.")
     async def clear(self, ctx: commands.Context) -> None:
         await database.set_setting(ctx.guild.id, HELP_HEADERS_SETTING, {})
-        await ctx.send("✅ All custom help headers were cleared.", ephemeral=True)
+        await ctx.send("All custom help headers were cleared.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

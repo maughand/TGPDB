@@ -114,11 +114,11 @@ class Music(commands.Cog):
         voice.play(source, after=playback_finished)
         channel = self.text_channels.get(guild_id)
         if channel:
-            await channel.send(f"🎶 Now playing **{track.title}**")
+            await channel.send(f"Now playing **{track.title}**")
 
     async def _voice_for(self, ctx: commands.Context) -> Optional[discord.VoiceClient]:
         if not ctx.author.voice or not ctx.author.voice.channel:
-            await ctx.send("❌ Join a voice channel first.", ephemeral=True)
+            await ctx.send("Join a voice channel first.", ephemeral=True)
             return None
         target = ctx.author.voice.channel
         voice = ctx.guild.voice_client
@@ -139,15 +139,15 @@ class Music(commands.Cog):
         if generation != self.playback_generation.get(ctx.guild.id, 0):
             if voice.is_connected() and not voice.is_playing() and not voice.is_paused():
                 await voice.disconnect()
-            await ctx.send("⏹️ Playback was stopped before the voice connection completed.", ephemeral=True)
+            await ctx.send("Playback was stopped before the voice connection completed.", ephemeral=True)
             return
         try:
             track = await asyncio.to_thread(self._extract, query)
         except Exception:
-            await ctx.send("❌ I could not find playable audio for that query.", ephemeral=True)
+            await ctx.send("I could not find playable audio for that query.", ephemeral=True)
             return
         if generation != self.playback_generation.get(ctx.guild.id, 0):
-            await ctx.send("⏹️ Playback was stopped before the search completed.", ephemeral=True)
+            await ctx.send("Playback was stopped before the search completed.", ephemeral=True)
             return
         queue = self.queues.setdefault(ctx.guild.id, [])
         self.text_channels[ctx.guild.id] = ctx.channel
@@ -156,17 +156,17 @@ class Music(commands.Cog):
         if was_idle:
             await self._play_next(ctx.guild.id, refresh_first=False)
         else:
-            await ctx.send(f"➕ Queued **{track.title}** (position {len(queue)}).")
+            await ctx.send(f"Queued **{track.title}** (position {len(queue)}).")
 
     @commands.hybrid_command(name="skip", description="Skip the current track.")
     @commands.guild_only()
     async def skip(self, ctx: commands.Context) -> None:
         voice = ctx.guild.voice_client
         if not voice or not voice.is_playing():
-            await ctx.send("❌ Nothing is playing.", ephemeral=True)
+            await ctx.send("Nothing is playing.", ephemeral=True)
             return
         voice.stop()
-        await ctx.send("⏭️ Skipped.")
+        await ctx.send("Skipped.")
 
     @commands.hybrid_command(name="pause", description="Pause music.")
     @commands.guild_only()
@@ -174,9 +174,9 @@ class Music(commands.Cog):
         voice = ctx.guild.voice_client
         if voice and voice.is_playing():
             voice.pause()
-            await ctx.send("⏸️ Paused.")
+            await ctx.send("Paused.")
         else:
-            await ctx.send("❌ Nothing is playing.", ephemeral=True)
+            await ctx.send("Nothing is playing.", ephemeral=True)
 
     @commands.hybrid_command(name="resume", description="Resume music.")
     @commands.guild_only()
@@ -186,7 +186,7 @@ class Music(commands.Cog):
             voice.resume()
             await ctx.send("▶️ Resumed.")
         else:
-            await ctx.send("❌ Music is not paused.", ephemeral=True)
+            await ctx.send("Music is not paused.", ephemeral=True)
 
     @commands.hybrid_command(name="queue", description="Show the music queue.")
     @commands.guild_only()
@@ -205,7 +205,7 @@ class Music(commands.Cog):
         voice = ctx.guild.voice_client
         if voice and isinstance(voice.source, discord.PCMVolumeTransformer):
             voice.source.volume = percent / 100
-        await ctx.send(f"🔊 Volume set to {percent}%.")
+        await ctx.send(f"Volume set to {percent}%.")
 
     @commands.hybrid_command(name="stop", description="Stop music and clear the queue.")
     @commands.guild_only()
@@ -214,7 +214,7 @@ class Music(commands.Cog):
         self.playback_generation[ctx.guild.id] = self.playback_generation.get(ctx.guild.id, 0) + 1
         if ctx.guild.voice_client:
             ctx.guild.voice_client.stop()
-        await ctx.send("⏹️ Stopped and cleared the queue.")
+        await ctx.send("Stopped and cleared the queue.")
 
     @commands.hybrid_command(name="leave", description="Disconnect the bot from voice.")
     @commands.guild_only()
@@ -223,7 +223,7 @@ class Music(commands.Cog):
         self.playback_generation[ctx.guild.id] = self.playback_generation.get(ctx.guild.id, 0) + 1
         if ctx.guild.voice_client:
             await ctx.guild.voice_client.disconnect()
-        await ctx.send("👋 Left the voice channel.")
+        await ctx.send("Left the voice channel.")
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState) -> None:

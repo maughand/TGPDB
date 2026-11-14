@@ -120,24 +120,24 @@ class FeatureSettingModal(discord.ui.Modal, title="Bot feature setting"):
         raw_value = str(self.value.value).strip()
         if self.setting == "starboard_threshold":
             if not raw_value.isdigit() or not 1 <= int(raw_value) <= 100:
-                await interaction.response.send_message("❌ Starboard threshold must be a number from 1 to 100.", ephemeral=True)
+                await interaction.response.send_message("Starboard threshold must be a number from 1 to 100.", ephemeral=True)
                 return
             value: object = int(raw_value)
         elif self.setting == "autorole_id":
             role_id = raw_value.strip("<@&>")
             if not role_id.isdigit() or self.panel.guild.get_role(int(role_id)) is None:
-                await interaction.response.send_message("❌ Enter a valid role ID or role mention.", ephemeral=True)
+                await interaction.response.send_message("Enter a valid role ID or role mention.", ephemeral=True)
                 return
             role = self.panel.guild.get_role(int(role_id))
             moderator = self.panel.guild.get_member(self.panel.user_id)
             if moderator is None or not moderator.guild_permissions.manage_roles:
-                await interaction.response.send_message("❌ You need Manage Roles to configure an autorole.", ephemeral=True)
+                await interaction.response.send_message("You need Manage Roles to configure an autorole.", ephemeral=True)
                 return
             if role is None or role.is_default() or role.managed or self.panel.guild.me is None or role >= self.panel.guild.me.top_role:
-                await interaction.response.send_message("❌ I can only assign a normal role below my highest role.", ephemeral=True)
+                await interaction.response.send_message("I can only assign a normal role below my highest role.", ephemeral=True)
                 return
             if moderator and moderator != self.panel.guild.owner and role >= moderator.top_role:
-                await interaction.response.send_message("❌ You cannot configure a role at or above your highest role.", ephemeral=True)
+                await interaction.response.send_message("You cannot configure a role at or above your highest role.", ephemeral=True)
                 return
             value = role.id
         else:
@@ -145,7 +145,7 @@ class FeatureSettingModal(discord.ui.Modal, title="Bot feature setting"):
             if self.setting in {"welcome_message", "farewell_message"}:
                 template_error = _validate_template(raw_value)
                 if template_error:
-                    await interaction.response.send_message(f"❌ {template_error}", ephemeral=True)
+                    await interaction.response.send_message(template_error, ephemeral=True)
                     return
         await interaction.response.defer()
         await database.set_setting(self.panel.guild.id, self.setting, value)
@@ -464,24 +464,24 @@ class BotSetup(commands.Cog):
         feature = feature.lower().strip()
         if feature not in CHANNEL_FEATURES:
             choices = ", ".join(CHANNEL_FEATURES)
-            await ctx.send(f"❌ Unknown feature. Choose one of: `{choices}`.", ephemeral=True)
+            await ctx.send(f"Unknown feature. Choose one of: `{choices}`.", ephemeral=True)
             return
         await ctx.defer(ephemeral=True)
         await database.set_channel(ctx.guild.id, feature, channel.id)
         await database.upsert_guild(ctx.guild)
         if feature == "member_count":
             await update_member_count_channel(ctx.guild, force=True)
-        await ctx.send(f"✅ {CHANNEL_FEATURES[feature]} will use {channel.mention}.", ephemeral=True)
+        await ctx.send(f"{CHANNEL_FEATURES[feature]} will use {channel.mention}.", ephemeral=True)
 
     @botsetup.command(name="clear", description="Clear a configured bot feature channel.")
     async def clear(self, ctx: commands.Context, feature: str) -> None:
         """Remove a channel assignment for this guild."""
         feature = feature.lower().strip()
         if feature not in CHANNEL_FEATURES:
-            await ctx.send(f"❌ Unknown feature. Choose one of: `{', '.join(CHANNEL_FEATURES)}`.", ephemeral=True)
+            await ctx.send(f"Unknown feature. Choose one of: `{', '.join(CHANNEL_FEATURES)}`.", ephemeral=True)
             return
         await database.set_channel(ctx.guild.id, feature, None)
-        await ctx.send(f"✅ Cleared the {CHANNEL_FEATURES[feature].lower()} channel.", ephemeral=True)
+        await ctx.send(f"Cleared the {CHANNEL_FEATURES[feature].lower()} channel.", ephemeral=True)
 
     @botsetup.command(name="membercount", description="Configure a live member count channel name.")
     async def membercount(self, ctx: commands.Context, channel: discord.TextChannel, custom_text: str) -> None:
@@ -495,7 +495,7 @@ class BotSetup(commands.Cog):
         )
         await update_member_count_channel(ctx.guild, force=True)
         await ctx.send(
-            f"✅ Member count channel configured in {channel.mention}.",
+            f"Member count channel configured in {channel.mention}.",
             ephemeral=True,
         )
 
@@ -518,7 +518,7 @@ class BotSetup(commands.Cog):
         await ctx.defer(ephemeral=True)
         await database.sync_guild_members(ctx.guild)
         await update_member_count_channel(ctx.guild, force=True)
-        await ctx.send(f"✅ Saved guild information and {len(ctx.guild.members)} member(s).", ephemeral=True)
+        await ctx.send(f"Saved guild information and {len(ctx.guild.members)} member(s).", ephemeral=True)
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
@@ -545,14 +545,14 @@ class BotSetup(commands.Cog):
         if ctx.cog is not self:
             return
         if isinstance(error, commands.MissingPermissions):
-            await ctx.send("❌ Only server owners or administrators can change bot setup.", ephemeral=True)
+            await ctx.send("Only server owners or administrators can change bot setup.", ephemeral=True)
         elif isinstance(error, commands.NoPrivateMessage):
-            await ctx.send("❌ This command can only be used in a server.", ephemeral=True)
+            await ctx.send("This command can only be used in a server.", ephemeral=True)
         elif isinstance(error, commands.BadArgument):
-            await ctx.send("❌ I could not resolve that channel. Mention a text channel.", ephemeral=True)
+            await ctx.send("I could not resolve that channel. Mention a text channel.", ephemeral=True)
         else:
             logger.exception("Bot setup command failed", exc_info=error)
-            await ctx.send("❌ Bot setup failed.", ephemeral=True)
+            await ctx.send("Bot setup failed.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

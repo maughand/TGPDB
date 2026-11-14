@@ -459,7 +459,7 @@ class BotSetup(commands.Cog):
             choices = ", ".join(CHANNEL_FEATURES)
             await ctx.send(f"❌ Unknown feature. Choose one of: `{choices}`.", ephemeral=True)
             return
-        await ctx.defer()
+        await ctx.defer(ephemeral=True)
         await database.set_channel(ctx.guild.id, feature, channel.id)
         await database.upsert_guild(ctx.guild)
         if feature == "member_count":
@@ -479,7 +479,7 @@ class BotSetup(commands.Cog):
     @botsetup.command(name="membercount", description="Configure a live member count channel name.")
     async def membercount(self, ctx: commands.Context, channel: discord.TextChannel, custom_text: str) -> None:
         """Assign a channel and set the text shown before its live member count."""
-        await ctx.defer()
+        await ctx.defer(ephemeral=True)
         await database.set_channel(ctx.guild.id, "member_count", channel.id)
         await database.set_setting(
             ctx.guild.id,
@@ -508,7 +508,7 @@ class BotSetup(commands.Cog):
     @botsetup.command(name="sync", description="Save the current guild and member information.")
     async def sync(self, ctx: commands.Context) -> None:
         """Refresh the persisted guild/member snapshot."""
-        await ctx.defer()
+        await ctx.defer(ephemeral=True)
         await database.sync_guild_members(ctx.guild)
         await update_member_count_channel(ctx.guild, force=True)
         await ctx.send(f"✅ Saved guild information and {len(ctx.guild.members)} member(s).", ephemeral=True)

@@ -7,7 +7,7 @@ import database
 logger = logging.getLogger("bot")
 
 APP_COMMAND_PERMISSIONS: dict[str, str] = {
-    "botsetup": "manage_guild", "botsetup channel": "manage_guild", "botsetup clear": "manage_guild",
+    "botsetup": "manage_guild", "botsetup panel": "manage_guild", "botsetup channel": "manage_guild", "botsetup clear": "manage_guild",
     "botsetup membercount": "manage_guild", "botsetup show": "manage_guild", "botsetup sync": "manage_guild",
     "welcome": "manage_guild", "welcome set": "manage_guild", "welcome disable": "manage_guild", "welcome preview": "manage_guild",
     "farewell": "manage_guild", "farewell set": "manage_guild", "farewell disable": "manage_guild",

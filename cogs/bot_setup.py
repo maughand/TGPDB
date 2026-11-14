@@ -59,7 +59,7 @@ async def update_member_count_channel(guild: discord.Guild, *, force: bool = Tru
         return
     channel_id = await database.get_channel(guild.id, "member_count")
     channel = guild.get_channel(channel_id) if channel_id else None
-    if not isinstance(channel, discord.TextChannel):
+    if not isinstance(channel, (discord.TextChannel, discord.CategoryChannel)):
         return
     label = await database.get_setting(guild.id, MEMBER_COUNT_LABEL_SETTING, DEFAULT_MEMBER_COUNT_LABEL)
     label = str(label or DEFAULT_MEMBER_COUNT_LABEL).strip()[:80]
@@ -182,8 +182,8 @@ class SetupPanel(discord.ui.View):
         self.add_item(self.feature_select)
 
         self.channel_select = discord.ui.ChannelSelect(
-            placeholder="Choose a text channel...",
-            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            placeholder="Choose a text channel or category...",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news, discord.ChannelType.category],
             row=1,
         )
         self.channel_select.callback = self._channel_selected
@@ -265,7 +265,7 @@ class SetupPanel(discord.ui.View):
         elif self.page == 1:
             selected_channel = self.guild.get_channel(self.selected_channel_id) if self.selected_channel_id else None
             title = "Bot setup · Configure channels"
-            description = "Select a feature, choose a text channel, then press **Save channel**."
+            description = "Select a feature, choose a text channel or category, then press **Save channel**."
             fields = [
                 ("Feature", CHANNEL_FEATURES[self.selected_feature], True),
                 ("Channel", selected_channel.mention if selected_channel else "No channel selected", True),
@@ -438,18 +438,25 @@ class SetupPanel(discord.ui.View):
 class BotSetup(commands.Cog):
     """Let a server owner or administrator configure bot channels."""
 
+    async def _send_panel(self, ctx: commands.Context) -> None:
+        panel = SetupPanel(ctx.guild, ctx.author.id)
+        await panel.load()
+        await ctx.send(
+            embed=panel._embed(),
+            view=panel,
+            ephemeral=ctx.interaction is not None,
+        )
+
     @commands.hybrid_group(name="botsetup", description="Configure TGPDB for this server.")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_guild=True)
     async def botsetup(self, ctx: commands.Context) -> None:
         if ctx.invoked_subcommand is None:
-            panel = SetupPanel(ctx.guild, ctx.author.id)
-            await panel.load()
-            await ctx.send(
-                embed=panel._embed(),
-                view=panel,
-                ephemeral=ctx.interaction is not None,
-            )
+            await self._send_panel(ctx)
+
+    @botsetup.command(name="panel", description="Open the interactive TGPDB setup panel.")
+    async def panel(self, ctx: commands.Context) -> None:
+        await self._send_panel(ctx)
 
     @botsetup.command(name="channel", description="Assign a channel to a bot feature.")
     async def channel(self, ctx: commands.Context, feature: str, channel: discord.TextChannel) -> None:

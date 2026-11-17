@@ -27,90 +27,77 @@ SUPPORTED_HOSTS = (
 DOWNLOAD_SEMAPHORE = asyncio.Semaphore(2)
 
 
-@dataclass(frozen=True)
-class MediaResult:
-    url: str
-    source_url: str
-    filename: str
-    kind: str
-
-
-def _is_supported_url(url: str) -> bool:
-    hostname = (urlsplit(url).hostname or "").lower().removeprefix("www.")
-    return any(hostname == domain or hostname.endswith(f".{domain}") for domain in SUPPORTED_HOSTS)
+import discord
+from discord.ext import commands
+import re
 
 
 class MediaLinks(commands.Cog):
-    """Turn supported public social links into Discord auto-embeds."""
+    """Detects Instagram and X (Twitter) links and reposts them properly."""
 
-    @staticmethod
-    def _find_url(content: str) -> str | None:
-        for match in URL_PATTERN.finditer(content):
-            url = match.group(0).rstrip(".,!?)")
-            if _is_supported_url(url):
-                return url
-        return None
+    INSTA_PATTERN = re.compile(
+        r"(https?://(?:www\.)?instagram\.com/(?:p|reel|tv)/[A-Za-z0-9_-]+)"
+    )
 
-    @staticmethod
-    async def _resolve(source_url: str) -> MediaResult:
-        if not settings.COBALT_REQUEST_URL:
-            raise RuntimeError("COBALT_API_URL is not configured")
+    X_PATTERN = re.compile(
+        r"(https?://(?:www\.)?(?:twitter\.com|x\.com)/[A-Za-z0-9_]+/status/[0-9]+)"
+    )
 
-        headers = {"Accept": "application/json", "Content-Type": "application/json"}
-        if settings.COBALT_API_KEY:
-            headers["Authorization"] = f"Api-Key {settings.COBALT_API_KEY}"
-        payload = {
-            "url": source_url,
-            "downloadMode": "auto",
-            "videoQuality": "1080",
-            "filenameStyle": "basic",
-            "alwaysProxy": True,
-        }
-        timeout = aiohttp.ClientTimeout(total=settings.COBALT_TIMEOUT_SECONDS)
-        api_url = settings.COBALT_REQUEST_URL.rstrip("/")
-        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
-            async with session.post(api_url, json=payload) as response:
-                body = await response.json(content_type=None)
-                if response.status >= 400:
-                    raise RuntimeError(f"Cobalt returned HTTP {response.status}")
-
-        status = body.get("status")
-        if status in {"tunnel", "redirect"} and body.get("url"):
-            return MediaResult(str(body["url"]), source_url, str(body.get("filename") or "media"), "video")
-        if status == "picker":
-            items = body.get("picker") or []
-            item = next((entry for entry in items if entry.get("type") in {"video", "gif"}), None)
-            item = item or next((entry for entry in items if entry.get("type") == "photo"), None)
-            if item and item.get("url"):
-                return MediaResult(str(item["url"]), source_url, "media", str(item.get("type") or "media"))
-        if status == "error":
-            error = body.get("error") or {}
-            raise RuntimeError(f"Cobalt error: {error.get('code', 'unknown')}")
-        raise RuntimeError(f"Unsupported Cobalt response: {status or 'unknown'}")
-
-    async def _process_url(self, message: discord.Message, source_url: str) -> None:
-        async with DOWNLOAD_SEMAPHORE:
-            status_message = await message.channel.send("Resolving media link…")
-            try:
-                result = await self._resolve(source_url)
-                # The media URL is sent to Discord rather than downloaded by the bot.
-                content = f"{result.url}\nSource: <{result.source_url}>"
-                await message.channel.send(content, allowed_mentions=discord.AllowedMentions.none())
-                await status_message.delete()
-            except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as error:
-                logger.warning("Media link resolution failed for %s: %s", source_url, error)
-                await status_message.edit(content="I could not resolve that media link. It may be private, unavailable, or unsupported.")
-            except discord.HTTPException:
-                logger.warning("Could not send the resolved media link for %s", source_url)
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
 
     @commands.Cog.listener()
-    async def on_message(self, message: discord.Message) -> None:
-        if message.author.bot:
+    async def on_message(self, message: discord.Message):
+        """Detects social media links and routes them to the correct handler."""
+        if message.author.bot or not message.content:
             return
-        source_url = self._find_url(message.content)
-        if source_url:
-            await self._process_url(message, source_url)
 
+        # Handle X / Twitter Links
+        x_match = self.X_PATTERN.search(message.content)
+        if x_match:
+            original_url = x_match.group(1)
+            print(f"X/Twitter link found: {original_url}")
+            await self._handle_x_link(message, original_url)
+            return
+
+        # Handle Instagram Links
+        insta_match = self.INSTA_PATTERN.search(message.content)
+        if insta_match:
+            url = insta_match.group(1)
+            print(f"Instagram link found: {url}")
+            await self._handle_instagram_link(message, url)
+            return
+
+    async def _handle_x_link(self, message: discord.Message, url: str):
+        """Replaces standard X/Twitter domain with FxEmbed domain."""
+        try:
+            fixed_url = re.sub(r"https?://(?:www\.)?(twitter\.com|x\.com)", "https://fixupx.com", url)
+            formatted_message = f"[X / Twitter Post]({fixed_url})\n-# Sent by {message.author.name}"
+
+            await self._repost_and_delete(message, formatted_message)
+            print("X message sent to channel")
+        except Exception as e:
+            print(f"Error processing X link: {e}")
+
+    async def _handle_instagram_link(self, message: discord.Message, url: str):
+        """Replaces standard Instagram domain with kkinstagram."""
+        try:
+            # Swap domain to the working kkinstagram proxy
+            fixed_url = re.sub(r"https?://(?:www\.)?instagram\.com", "https://kkinstagram.com", url)
+            formatted_message = f"[Instagram Post]({fixed_url})\n-# Sent by {message.author.name}"
+
+            await self._repost_and_delete(message, formatted_message)
+            print("Instagram message sent to channel")
+        except Exception as e:
+            print(f"Error processing Instagram link: {e}")
+
+    async def _repost_and_delete(self, message: discord.Message, new_content: str):
+        """Helper method to send the new formatted message and delete the original."""
+        await message.channel.send(new_content)
+
+        # Delete original message if the bot has the correct permissions
+        if message.guild and message.guild.me.guild_permissions.manage_messages:
+            await message.delete()
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(MediaLinks())

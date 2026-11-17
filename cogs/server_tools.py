@@ -115,13 +115,14 @@ class ServerTools(commands.Cog):
     @commands.has_guild_permissions(manage_guild=True)
     async def health_enable(self, ctx: commands.Context) -> None:
         await database.set_setting(ctx.guild.id, "health_dashboard_enabled", True)
-            await ctx.send("Daily health dashboard posts enabled.", ephemeral=True)
+        await ctx.send("Daily health dashboard posts enabled.", ephemeral=True)
+
 
     @health.command(name="disable", description="Disable daily server health posts.")
     @commands.has_guild_permissions(manage_guild=True)
     async def health_disable(self, ctx: commands.Context) -> None:
         await database.set_setting(ctx.guild.id, "health_dashboard_enabled", False)
-            await ctx.send("Daily health dashboard posts disabled.", ephemeral=True)
+        await ctx.send("Daily health dashboard posts disabled.", ephemeral=True)
 
     @commands.hybrid_group(name="incident", description="Manage private moderation incident timelines.")
     @commands.guild_only()

@@ -1,8 +1,6 @@
 """YouTube upload and live-stream notifications for multiple platforms."""
-
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 import logging
 import xml.etree.ElementTree as ET
@@ -14,7 +12,6 @@ from discord.ext import commands, tasks
 
 import database
 import settings
-
 
 logger = logging.getLogger(__name__)
 SUPPORTED_PLATFORMS = {"youtube", "twitch", "kick"}
@@ -96,7 +93,6 @@ class Notifications(commands.Cog):
         ns = {"atom": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015"}
         video_id = entry.findtext("yt:videoId", namespaces=ns)
         title = entry.findtext("atom:title", namespaces=ns) or "New YouTube upload"
-        published = entry.findtext("atom:published", namespaces=ns) or ""
         creator = entry.findtext("atom:author/atom:name", namespaces=ns) or channel_id
         if not video_id:
             return None
@@ -232,7 +228,7 @@ class Notifications(commands.Cog):
         removed = await database.remove_notification_subscription(
             ctx.guild.id, platform.casefold(), identifier.strip().removeprefix("@").rstrip("/")
         )
-            await ctx.send("Subscription removed." if removed else "Subscription not found.", ephemeral=True)
+        await ctx.send("Subscription removed." if removed else "Subscription not found.", ephemeral=True)
 
     @notify.command(name="list", description="List this server's notification subscriptions.")
     async def notify_list(self, ctx: commands.Context) -> None:

@@ -25,6 +25,11 @@ MAX_PURGE = 100
 class Moderation(commands.Cog):
     """Tools commonly needed by server moderators and owners."""
 
+    async def cog_before_invoke(self, ctx: commands.Context) -> None:
+        """Acknowledge slash commands before Discord actions, DMs, or logging."""
+        if ctx.interaction is not None and not ctx.interaction.response.is_done():
+            await ctx.defer(ephemeral=True)
+
     async def _log_action(
         self,
         ctx: commands.Context,
@@ -262,7 +267,6 @@ class Moderation(commands.Cog):
     @commands.bot_has_guild_permissions(manage_messages=True)
     async def purge(self, ctx: commands.Context, amount: commands.Range[int, 1, MAX_PURGE]) -> None:
         """Bulk delete recent messages."""
-        await ctx.defer(ephemeral=True)
         deleted = await ctx.channel.purge(limit=amount, reason=f"Purged by {ctx.author} ({ctx.author.id})")
         await self._log_action(ctx, "Purge", details=f"Deleted {len(deleted)} message(s) in {ctx.channel.mention}")
         await ctx.send(f"Deleted {len(deleted)} message(s).", ephemeral=True, delete_after=5)
@@ -334,21 +338,34 @@ class Moderation(commands.Cog):
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError) -> None:
         if ctx.cog is not self:
             return
-        if isinstance(error, commands.CommandNotFound):
+        original = error
+        while isinstance(original, (commands.CommandInvokeError, commands.HybridCommandError, discord.app_commands.CommandInvokeError)):
+            original = original.original
+        if isinstance(original, commands.CommandNotFound):
             return
-        if isinstance(error, commands.MissingPermissions):
-            await ctx.send("You do not have permission to use that command.", ephemeral=True)
-        elif isinstance(error, commands.BotMissingPermissions):
-            await ctx.send("I am missing a required Discord permission.", ephemeral=True)
-        elif isinstance(error, commands.NoPrivateMessage):
-            await ctx.send("This command can only be used in a server.", ephemeral=True)
-        elif isinstance(error, commands.MemberNotFound):
-            await ctx.send("I could not find that member.", ephemeral=True)
-        elif isinstance(error, commands.BadArgument):
-            await ctx.send("One of the arguments is invalid. Check the command help.", ephemeral=True)
+        if ctx.interaction is not None and (
+            ctx.interaction.is_expired()
+            or isinstance(original, discord.NotFound) and original.code in {10062, 10015}
+        ):
+            logger.warning("Could not respond to moderation command: the interaction has expired", exc_info=error)
+            return
+        if isinstance(original, commands.MissingPermissions):
+            message = "You do not have permission to use that command."
+        elif isinstance(original, commands.BotMissingPermissions):
+            message = "I am missing a required Discord permission."
+        elif isinstance(original, commands.NoPrivateMessage):
+            message = "This command can only be used in a server."
+        elif isinstance(original, commands.MemberNotFound):
+            message = "I could not find that member."
+        elif isinstance(original, commands.BadArgument):
+            message = "One of the arguments is invalid. Check the command help."
         else:
             logger.error("Moderation command failed", exc_info=error)
-            await ctx.send("Something went wrong while running that command.", ephemeral=True)
+            message = "Something went wrong while running that command."
+        try:
+            await ctx.send(message, ephemeral=True)
+        except discord.HTTPException:
+            logger.warning("Could not deliver the moderation command error response", exc_info=True)
 
 
 async def setup(bot: commands.Bot) -> None:

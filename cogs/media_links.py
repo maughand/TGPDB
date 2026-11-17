@@ -1,6 +1,7 @@
-"""Detects Instagram and X (Twitter) links and reposts them with multi-image carousel support."""
+"""Detects Instagram and X (Twitter) links and reposts them with sideways carousel buttons."""
 from __future__ import annotations
 
+import html
 import logging
 import re
 from typing import Any
@@ -14,22 +15,20 @@ import database
 logger = logging.getLogger(__name__)
 
 
-class InstagramCarouselView(discord.ui.View):
-    """Interactive Prev/Next button carousel for multi-image Instagram posts."""
+class InstagramEmbedCarouselView(discord.ui.View):
+    """Sideways-scrolling Discord Embed carousel when direct slide image URLs are extracted."""
 
     def __init__(
         self,
-        slides: list[dict[str, Any]],
+        slides: list[str],
         source_url: str,
         author_name: str,
-        caption: str,
-        insta_author: str,
+        insta_author: str = "",
     ) -> None:
-        super().__init__(timeout=900)  # Buttons stay active for 15 minutes
+        super().__init__(timeout=1800)  # Active for 30 minutes
         self.slides = slides[:10]
         self.source_url = source_url
         self.author_name = author_name
-        self.caption = caption
         self.insta_author = insta_author
         self.index = 0
         self._update_buttons()
@@ -37,17 +36,15 @@ class InstagramCarouselView(discord.ui.View):
     def _update_buttons(self) -> None:
         self.prev_button.disabled = self.index == 0
         self.next_button.disabled = self.index >= len(self.slides) - 1
-        self.counter_button.label = f"{self.index + 1} / {len(self.slides)}"
+        self.counter_button.label = f"Slide {self.index + 1} / {len(self.slides)}"
 
     def build_embed(self) -> discord.Embed:
-        slide = self.slides[self.index]
         embed = discord.Embed(
             title=f"Instagram Post (@{self.insta_author})" if self.insta_author else "Instagram Post",
             url=self.source_url,
-            description=self.caption[:400] + ("..." if len(self.caption) > 400 else "") if self.caption else None,
             colour=discord.Colour.from_rgb(225, 48, 108),
         )
-        embed.set_image(url=slide["url"])
+        embed.set_image(url=self.slides[self.index])
         embed.set_footer(text=f"Slide {self.index + 1} of {len(self.slides)} • Sent by {self.author_name}")
         return embed
 
@@ -57,7 +54,7 @@ class InstagramCarouselView(discord.ui.View):
         self._update_buttons()
         await interaction.response.edit_message(embed=self.build_embed(), view=self)
 
-    @discord.ui.button(label="1 / 1", style=discord.ButtonStyle.gray, disabled=True)
+    @discord.ui.button(label="Slide 1 / 1", style=discord.ButtonStyle.gray, disabled=True)
     async def counter_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         pass
 
@@ -68,14 +65,62 @@ class InstagramCarouselView(discord.ui.View):
         await interaction.response.edit_message(embed=self.build_embed(), view=self)
 
 
+class KKInstagramSlideView(discord.ui.View):
+    """Sideways-scrolling view that cycles through kkinstagram.com/p/CODE/1..10 slides."""
+
+    def __init__(
+        self,
+        shortcode: str,
+        author_name: str,
+        initial_slide: int = 1,
+        max_slides: int = 10,
+    ) -> None:
+        super().__init__(timeout=1800)  # Active for 30 minutes
+        self.shortcode = shortcode
+        self.author_name = author_name
+        self.max_slides = max(1, min(max_slides, 10))
+        self.slide = max(1, min(initial_slide, self.max_slides))
+        self._update_buttons()
+
+    def _update_buttons(self) -> None:
+        self.prev_button.disabled = self.slide <= 1
+        self.next_button.disabled = self.slide >= self.max_slides
+        if self.max_slides < 10:
+            self.counter_button.label = f"Slide {self.slide} / {self.max_slides}"
+        else:
+            self.counter_button.label = f"Slide {self.slide}"
+
+    def build_content(self) -> str:
+        fixed_url = f"https://kkinstagram.com/p/{self.shortcode}/{self.slide}"
+        return f"[Instagram Post (Slide {self.slide})]({fixed_url})\n-# Sent by {self.author_name}"
+
+    @discord.ui.button(label="◀️", style=discord.ButtonStyle.secondary)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.slide = max(1, self.slide - 1)
+        self._update_buttons()
+        await interaction.response.edit_message(content=self.build_content(), view=self)
+
+    @discord.ui.button(label="Slide 1", style=discord.ButtonStyle.gray, disabled=True)
+    async def counter_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        pass
+
+    @discord.ui.button(label="▶️", style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.slide = min(self.max_slides, self.slide + 1)
+        self._update_buttons()
+        await interaction.response.edit_message(content=self.build_content(), view=self)
+
+
 class MediaLinks(commands.Cog):
     """Detects Instagram and X (Twitter) links and reposts them properly."""
 
-    # Matches /p/, /reel/, /reels/, /tv/, and username-prefixed URLs like instagram.com/username/p/CODE
+    # Captures full URL, post type (p/reel/reels/tv), shortcode, and optional ?img_index=N
     INSTA_PATTERN = re.compile(
-        r"(https?://(?:www\.)?instagram\.com/(?:[A-Za-z0-9_.-]+/)?(?:p|reel|reels|tv)/([A-Za-z0-9_-]+))",
+        r"(https?://(?:www\.)?instagram\.com/(?:[A-Za-z0-9_.-]+/)?(p|reel|reels|tv)/([A-Za-z0-9_-]+)[^\s<>]*)",
         re.IGNORECASE,
     )
+
+    IMG_INDEX_PATTERN = re.compile(r"[?&]img_index=(\d+)", re.IGNORECASE)
 
     X_PATTERN = re.compile(
         r"(https?://(?:www\.)?(?:twitter\.com|x\.com)/[A-Za-z0-9_]+/status/[0-9]+)",
@@ -102,29 +147,55 @@ class MediaLinks(commands.Cog):
         # Handle Instagram Links
         insta_match = self.INSTA_PATTERN.search(message.content)
         if insta_match:
-            url = insta_match.group(1)
-            shortcode = insta_match.group(2)
-            logger.info("Instagram link found: %s (shortcode: %s)", url, shortcode)
-            await self._handle_instagram_link(message, url, shortcode)
+            full_url = insta_match.group(1).rstrip(".,!?)")
+            kind = insta_match.group(2).lower()
+            shortcode = insta_match.group(3)
+            index_match = self.IMG_INDEX_PATTERN.search(full_url)
+            initial_slide = int(index_match.group(1)) if index_match else 1
+            logger.info("Instagram link found: %s (kind=%s, shortcode=%s)", full_url, kind, shortcode)
+            await self._handle_instagram_link(message, full_url, kind, shortcode, initial_slide)
             return
 
-    async def _fetch_instagram_slides(self, shortcode: str) -> dict[str, Any] | None:
-        """Query vxinstagram's JSON API to see if the post is a multi-image carousel."""
-        api_url = f"https://api.vxinstagram.com/p/{shortcode}"
-        timeout = aiohttp.ClientTimeout(total=10)
-        headers = {"User-Agent": "Discordbot/2.0", "Accept": "application/json"}
+    async def _scrape_instagram_embed_slides(self, shortcode: str) -> list[str]:
+        """Extract all carousel image URLs from Instagram's public embed page."""
+        embed_url = f"https://www.instagram.com/p/{shortcode}/embed/captioned/"
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        timeout = aiohttp.ClientTimeout(total=8)
         try:
             async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
-                async with session.get(api_url) as resp:
+                async with session.get(embed_url) as resp:
                     if resp.status != 200:
-                        return None
-                    data = await resp.json(content_type=None)
-                    if not isinstance(data, dict):
-                        return None
-                    return data
+                        return []
+                    raw_html = await resp.text()
+
+            # 1. Check for escaped JSON display_url entries inside the embed script payload
+            urls: list[str] = []
+            for match in re.finditer(r'"display_url"\s*:\s*"([^"]+)"', raw_html):
+                cleaned = match.group(1).encode("utf-8").decode("unicode_escape").replace(r"\/", "/")
+                cleaned = html.unescape(cleaned)
+                if cleaned not in urls:
+                    urls.append(cleaned)
+
+            # 2. Check for EmbeddedMediaImage src attributes if JSON payload isn't present
+            if len(urls) <= 1:
+                for match in re.finditer(
+                    r'class="[^"]*EmbeddedMediaImage[^"]*"[^>]+src="([^"]+)"',
+                    raw_html,
+                ):
+                    cleaned = html.unescape(match.group(1))
+                    if cleaned not in urls:
+                        urls.append(cleaned)
+
+            return urls[:10]
         except Exception as exc:
-            logger.debug("Carousel metadata fetch skipped for %s: %s", shortcode, exc)
-            return None
+            logger.debug("Embed slide scrape failed for %s: %s", shortcode, exc)
+            return []
 
     async def _handle_x_link(self, message: discord.Message, url: str) -> None:
         """Replaces standard X/Twitter domain with FxEmbed domain."""
@@ -140,47 +211,50 @@ class MediaLinks(commands.Cog):
         except discord.HTTPException as exc:
             logger.warning("Error processing X link %s: %s", url, exc)
 
-    async def _handle_instagram_link(self, message: discord.Message, url: str, shortcode: str) -> None:
-        """Renders a scrollable button carousel for multi-image posts, or kkinstagram for videos/single posts."""
+    async def _handle_instagram_link(
+        self,
+        message: discord.Message,
+        url: str,
+        kind: str,
+        shortcode: str,
+        initial_slide: int = 1,
+    ) -> None:
+        """Handles Reels directly and provides sideways slide navigation for /p/ posts."""
         try:
-            data = await self._fetch_instagram_slides(shortcode)
-            media_items = (data or {}).get("media_extended") or (data or {}).get("media") or []
+            # Reels and TV links are single videos -> send directly via kkinstagram
+            if kind in {"reel", "reels", "tv"}:
+                fixed_url = f"https://kkinstagram.com/{kind}/{shortcode}"
+                formatted_message = f"[Instagram Reel]({fixed_url})\n-# Sent by {message.author.display_name}"
+                await self._repost_and_delete(message, content=formatted_message)
+                return
 
-            # Collect image slides if this is an image carousel (>1 image and no video slides)
-            image_slides = [
-                {"url": item.get("url") or item.get("image_url")}
-                for item in media_items
-                if isinstance(item, dict)
-                and item.get("type") in {"image", "photo", None}
-                and (item.get("url") or item.get("image_url"))
-            ]
-            has_video = any(
-                isinstance(item, dict) and item.get("type") in {"video", "gif"}
-                for item in media_items
-            )
-
-            if len(image_slides) > 1 and not has_video:
-                caption = str((data or {}).get("text") or (data or {}).get("caption") or "")
-                insta_author = str((data or {}).get("user_name") or (data or {}).get("author_name") or "")
-                view = InstagramCarouselView(
-                    slides=image_slides,
-                    source_url=url,
+            # For /p/ posts, first try extracting all carousel images from the embed page
+            slides = await self._scrape_instagram_embed_slides(shortcode)
+            if len(slides) > 1:
+                clean_source = f"https://www.instagram.com/p/{shortcode}/"
+                view = InstagramEmbedCarouselView(
+                    slides=slides,
+                    source_url=clean_source,
                     author_name=message.author.display_name,
-                    caption=caption,
-                    insta_author=insta_author,
                 )
+                view.index = max(0, min(initial_slide - 1, len(slides) - 1))
+                view._update_buttons()
                 await self._repost_and_delete(message, embed=view.build_embed(), view=view)
                 return
 
-            # Standard fallback for single posts, reels, or video carousels
-            fixed_url = re.sub(
-                r"https?://(?:www\.)?instagram\.com",
-                "https://kkinstagram.com",
-                url,
-                flags=re.IGNORECASE,
+            # Fallback: Use kkinstagram's /p/{shortcode}/{slide_num} URL indexer with ◀️ / ▶️ buttons
+            # This works for both multi-image AND multi-video carousels even if Instagram blocks scraping!
+            slide_view = KKInstagramSlideView(
+                shortcode=shortcode,
+                author_name=message.author.display_name,
+                initial_slide=initial_slide,
+                max_slides=10,
             )
-            formatted_message = f"[Instagram Post]({fixed_url})\n-# Sent by {message.author.display_name}"
-            await self._repost_and_delete(message, content=formatted_message)
+            await self._repost_and_delete(
+                message,
+                content=slide_view.build_content(),
+                view=slide_view,
+            )
         except discord.HTTPException as exc:
             logger.warning("Error processing Instagram link %s: %s", url, exc)
 

@@ -1,6 +1,14 @@
 # TGPDB
 The General Purpose Discord Bot
 
+## Server setup
+
+Open `/botsetup panel` to configure the server. Choose a feature from the page dropdown; each page shows only that feature's controls. Channel and role dropdowns save immediately. Use the dialogs to edit member count text, automod words, or the starboard reaction emoji and threshold. Starboard supports standard emoji and usable custom emoji from this server.
+
+Welcome and farewell pages each support up to 25 saved messages. Choose a channel, then **Add message**. Select a saved message to edit, remove, or preview it. The bot randomly chooses one message whenever a member joins or leaves. Disabling messages keeps the collection so it can be enabled again later.
+
+Message formatting supports `@(user)` for a member mention, `@(username)` for their display name, `@(server)` for the server name, and `@(member_count)` for the member count. For example: `Welcome @(user) to @(server)! You are member @(member_count).` Existing brace placeholders such as `{user}` still work, and existing single-message settings appear in the new editor automatically. `/welcome set` and `/farewell set` replace the collection with one message.
+
 ## Moderation
 
 The moderation cog in [`cogs/moderation.py`](./cogs/moderation.py) provides both slash commands and `!` prefix commands:

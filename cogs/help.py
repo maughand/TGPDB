@@ -10,10 +10,18 @@ from discord.ext import commands
 import database
 
 
-DEFAULT_HEADER = "misc"
+DEFAULT_HEADER = "Miscellaneous Commands"
+ADMIN_HEADER = "Administrator Commands"
+MOD_HEADER = "Mod Commands"
 HELP_HEADERS_SETTING = "help_command_headers"
+# Hide only these group entries; their individual subcommands stay in help.
+HIDDEN_HELP_COMMANDS = {
+    "assistant", "antiraid", "autorole", "botsetup", "farewell", "health",
+    "help_config", "levels", "notify", "role", "schedule", "starboard",
+    "welcome", "incident", "infractions",
+}
 DEFAULT_COMMAND_GROUPS = {
-    "misc": (
+    DEFAULT_HEADER: (
         "help",
         "levels leaderboard",
         "serverinfo",
@@ -21,7 +29,7 @@ DEFAULT_COMMAND_GROUPS = {
         "assistant infractions",
         "assistant profile",
     ),
-    "fun": (
+    "Useful Commands": (
         "8ball",
         "choose",
         "coinflip",
@@ -31,67 +39,58 @@ DEFAULT_COMMAND_GROUPS = {
         "ship",
         "to_gif",
     ),
-    "admin": (
-        "antiraid",
-        "antiraid disable",
-        "antiraid enable",
-        "automod",
-        "automod disable",
-        "automod enable",
-        "automod word",
-        "autorole",
-        "autorole clear",
-        "autorole set",
-        "botsetup",
+    ADMIN_HEADER: (
+        # Server setup and help organization.
+        "botsetup panel",
+        "botsetup show",
         "botsetup channel",
         "botsetup clear",
         "botsetup membercount",
-        "botsetup panel",
-        "botsetup show",
         "botsetup sync",
-        "farewell",
-        "farewell disable",
-        "farewell set",
-        "help_config",
         "help_config assign",
-        "help_config clear",
         "help_config remove",
-        "purge",
-        "lock",
-        "reactionroles",
-        "role",
+        "help_config clear",
+        # Member roles and join/leave messages.
+        "autorole set",
+        "autorole clear",
         "role add",
         "role remove",
-        "slowmode",
-        "starboard",
-        "starboard disable",
-        "starboard set",
-        "unlock",
-        "welcome",
-        "welcome disable",
-        "welcome preview",
+        "reactionroles",
         "welcome set",
-        "check_update",
-        "last_update",
-        "levels disable",
+        "welcome preview",
+        "welcome disable",
+        "farewell set",
+        "farewell disable",
+        # Server protection and channel controls.
+        "automod",
+        "automod enable",
+        "automod word",
+        "automod disable",
+        "antiraid enable",
+        "antiraid disable",
+        "lock",
+        "unlock",
+        "slowmode",
+        "purge",
+        # Community features, scheduling, and notifications.
         "levels enable",
-        "levels",
         "levels reward",
-        "schedule",
+        "levels disable",
+        "starboard set",
+        "starboard disable",
         "schedule add",
-        "schedule remove",
         "schedule list",
-        "health",
-        "health disable",
-        "health enable",
-        "notify",
+        "schedule remove",
         "notify add",
         "notify list",
         "notify remove",
+        "health enable",
+        "health disable",
+        "check_update",
+        "last_update",
     ),
-    "moderation": (
+    MOD_HEADER: (
         "ban",
-        "infractions",
         "infractions view",
         "kick",
         "softban",
@@ -99,7 +98,6 @@ DEFAULT_COMMAND_GROUPS = {
         "unban",
         "warn",
         "untimeout",
-        "incident",
         "incident add",
         "incident close",
         "incident open",
@@ -116,7 +114,7 @@ DEFAULT_COMMAND_GROUPS = {
         "volume",
     ),
 }
-# Match full command names so new commands (including subcommands) fall back to misc.
+# Match full command names so new commands use Miscellaneous Commands.
 DEFAULT_COMMAND_HEADERS = {
     name: header for header, names in DEFAULT_COMMAND_GROUPS.items() for name in names
 }
@@ -130,6 +128,8 @@ def _command_entries(bot: commands.Bot) -> list[tuple[str, str, str]]:
         if getattr(command, "hidden", False) or binding.__class__.__name__ == "OwnerCommands":
             continue
         name = command.qualified_name
+        if name in HIDDEN_HELP_COMMANDS:
+            continue
         description = getattr(command, "description", None) or "No description provided."
         entries[name] = (description, DEFAULT_COMMAND_HEADERS.get(name, DEFAULT_HEADER))
     return [(name, description, header) for name, (description, header) in sorted(entries.items())]
@@ -160,16 +160,22 @@ class HelpPages(discord.ui.View):
         for name, description, default_header in _command_entries(self.bot):
             header = self.headers.get(name, default_header)
             self.entries.append((name, description, header))
-        grouped: dict[str, list[str]] = defaultdict(list)
+        grouped: dict[str, list[tuple[str, str]]] = defaultdict(list)
         for name, description, header in self.entries:
-            grouped[header or DEFAULT_HEADER].append(f"`/{name}` — {description}")
+            grouped[header or DEFAULT_HEADER].append((name, description))
         self.pages = []
         header_order = {header: index for index, header in enumerate(DEFAULT_COMMAND_GROUPS)}
         for header in sorted(grouped, key=lambda header: (header_order.get(header, len(header_order)), header.casefold())):
-            lines = grouped[header]
-            for start in range(0, len(lines), 8):
-                suffix = "" if len(lines) <= 8 else f" ({start + 1}-{min(start + 8, len(lines))})"
-                self.pages.append((f"{header}{suffix}", "\n".join(lines[start:start + 8])))
+            category_entries = grouped[header]
+            if header == ADMIN_HEADER:
+                command_order = {name: index for index, name in enumerate(DEFAULT_COMMAND_GROUPS[ADMIN_HEADER])}
+                category_entries.sort(key=lambda entry: (command_order.get(entry[0], len(command_order)), entry[0]))
+            lines = [f"`/{name}` — {description}" for name, description in category_entries]
+            page_size = 20 if header == ADMIN_HEADER else len(lines) if header == MOD_HEADER else 8
+            for start in range(0, len(lines), page_size):
+                end = min(start + page_size, len(lines))
+                suffix = "" if len(lines) <= page_size else f" ({start + 1}-{end})"
+                self.pages.append((f"{header}{suffix}", "\n".join(lines[start:end])))
         if not self.pages:
             self.pages = [("No commands available", "The bot has not loaded any application commands yet.")]
         self.page = min(self.page, len(self.pages) - 1)

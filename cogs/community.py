@@ -7,7 +7,6 @@ from datetime import datetime, timedelta, timezone
 import json
 import logging
 import re
-import string
 import time
 from typing import Optional
 
@@ -15,36 +14,12 @@ import discord
 from discord.ext import commands, tasks
 
 import database
+from cogs._message_templates import choose_message, format_message as _format_message, validate_template as _validate_message_template
+from cogs._starboard import emoji_key
 
 
 logger = logging.getLogger(__name__)
 MESSAGE_LOG_FEATURE = "moderation_log"
-
-
-def _format_message(template: str, member: discord.Member) -> str:
-    try:
-        return template.format(
-            user=member.mention,
-            username=member.display_name,
-            server=member.guild.name,
-            member_count=member.guild.member_count or len(member.guild.members),
-        )[:2000]
-    except (AttributeError, IndexError, KeyError, ValueError):
-        return template[:2000]
-
-
-def _validate_message_template(template: str) -> Optional[str]:
-    """Return an error for unsupported or malformed template fields."""
-    allowed = {"user", "username", "server", "member_count"}
-    try:
-        for _, field_name, format_spec, conversion in string.Formatter().parse(template):
-            if field_name is not None and field_name not in allowed:
-                return f"Unsupported placeholder `{field_name}`. Use user, username, server, or member_count."
-            if format_spec or conversion:
-                return "Only simple placeholders such as `{user}` are supported."
-    except ValueError:
-        return "The template contains unmatched braces."
-    return None
 
 
 class Community(commands.Cog):
@@ -147,17 +122,21 @@ class Community(commands.Cog):
             await ctx.send(str(error), ephemeral=True)
             return
         await database.set_setting(ctx.guild.id, "welcome_message", message[:2000])
-        await ctx.send("Welcome message saved. Use `{user}`, `{username}`, `{server}`, and `{member_count}`.", ephemeral=True)
+        await database.set_setting(ctx.guild.id, "welcome_enabled", True)
+        await ctx.send("Welcome message saved. Use `@(user)`, `@(username)`, `@(server)`, and `@(member_count)`. Add more messages in `/botsetup panel`.", ephemeral=True)
 
     @welcome.command(name="disable", description="Disable welcome messages.")
     async def welcome_disable(self, ctx: commands.Context) -> None:
-        await database.set_setting(ctx.guild.id, "welcome_message", None)
+        await database.set_setting(ctx.guild.id, "welcome_enabled", False)
         await ctx.send("Welcome messages disabled.", ephemeral=True)
 
     @welcome.command(name="preview", description="Preview the configured welcome message.")
     async def welcome_preview(self, ctx: commands.Context) -> None:
-        template = await database.get_setting(ctx.guild.id, "welcome_message", "Welcome {user} to **{server}**!")
-        await ctx.send(_format_message(str(template), ctx.author), ephemeral=True)
+        template = await choose_message(ctx.guild.id, "welcome", include_disabled=True)
+        if template is None:
+            await ctx.send("Add a welcome message in `/botsetup panel` first.", ephemeral=True)
+            return
+        await ctx.send(_format_message(template, ctx.author), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     @commands.hybrid_group(name="farewell", description="Configure farewell messages.")
     @commands.guild_only()
@@ -173,11 +152,12 @@ class Community(commands.Cog):
             await ctx.send(str(error), ephemeral=True)
             return
         await database.set_setting(ctx.guild.id, "farewell_message", message[:2000])
+        await database.set_setting(ctx.guild.id, "farewell_enabled", True)
         await ctx.send("Farewell message saved.", ephemeral=True)
 
     @farewell.command(name="disable", description="Disable farewell messages.")
     async def farewell_disable(self, ctx: commands.Context) -> None:
-        await database.set_setting(ctx.guild.id, "farewell_message", None)
+        await database.set_setting(ctx.guild.id, "farewell_enabled", False)
         await ctx.send("Farewell messages disabled.", ephemeral=True)
 
     @commands.hybrid_group(name="autorole", description="Configure the role assigned to new members.")
@@ -386,19 +366,19 @@ class Community(commands.Cog):
                 await member.timeout(timedelta(minutes=10), reason="Anti-raid join burst")
             except discord.HTTPException:
                 pass
-        template = await database.get_setting(member.guild.id, "welcome_message")
+        template = await choose_message(member.guild.id, "welcome")
         channel = await self._channel(member.guild, "welcome")
         if template and channel:
-            await channel.send(_format_message(str(template), member))
+            await channel.send(_format_message(template, member), allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=[member], replied_user=False))
         await self._log(member.guild, "Member joined", f"{member.mention} (`{member.id}`) joined the server.")
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member) -> None:
         await database.add_daily_stat(member.guild.id, datetime.now(timezone.utc).date().isoformat(), "leaves")
-        template = await database.get_setting(member.guild.id, "farewell_message")
+        template = await choose_message(member.guild.id, "farewell")
         channel = await self._channel(member.guild, "farewell")
         if template and channel:
-            await channel.send(_format_message(str(template), member))
+            await channel.send(_format_message(template, member), allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=[member], replied_user=False))
         await self._log(member.guild, "Member left", f"{member} (`{member.id}`) left the server.")
 
     @commands.Cog.listener()
@@ -588,7 +568,10 @@ class Community(commands.Cog):
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
-        if payload.guild_id is None or str(payload.emoji) != "⭐":
+        if payload.guild_id is None:
+            return
+        emoji = str(await database.get_setting(payload.guild_id, "starboard_emoji", "⭐") or "⭐")
+        if emoji_key(str(payload.emoji)) != emoji_key(emoji):
             return
         channel = self.bot.get_channel(payload.channel_id)
         if not isinstance(channel, discord.TextChannel):
@@ -601,7 +584,7 @@ class Community(commands.Cog):
             source = await channel.fetch_message(payload.message_id)
             if source.author.bot:
                 return
-            reaction = discord.utils.get(source.reactions, emoji="⭐")
+            reaction = next((item for item in source.reactions if emoji_key(str(item.emoji)) == emoji_key(emoji)), None)
             if reaction is None or reaction.count < threshold or await database.get_starboard_message(channel.guild.id, source.id):
                 return
             if not await database.claim_starboard_message(channel.guild.id, source.id):
@@ -611,7 +594,7 @@ class Community(commands.Cog):
             if source.attachments:
                 embed.set_image(url=source.attachments[0].url)
             try:
-                posted = await starboard.send(content=f"⭐ **{reaction.count}** · {source.channel.mention}", embed=embed)
+                posted = await starboard.send(content=f"{emoji} **{reaction.count}** · {source.channel.mention}", embed=embed)
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 await database.release_starboard_claim(channel.guild.id, source.id)
                 return
